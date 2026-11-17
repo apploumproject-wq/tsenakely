@@ -318,11 +318,13 @@ class TsenakelyDatabase {
     `);
 
     const productColumns = queryAll<{name: string}>(db, `PRAGMA table_info(products)`).map((column) => column.name);
-    if (!productColumns.includes('image_data_url')) db.run(`ALTER TABLE products ADD COLUMN image_data_url TEXT`);
     const saleColumns = queryAll<{name: string}>(db, `PRAGMA table_info(sales)`).map((column) => column.name);
+    let schemaChanged = false;
+    if (!productColumns.includes('image_data_url')) { db.run(`ALTER TABLE products ADD COLUMN image_data_url TEXT`); schemaChanged = true; }
     for (const column of ['customer_name', 'customer_phone', 'customer_email', 'customer_address']) {
-      if (!saleColumns.includes(column)) db.run(`ALTER TABLE sales ADD COLUMN ${column} TEXT`);
+      if (!saleColumns.includes(column)) { db.run(`ALTER TABLE sales ADD COLUMN ${column} TEXT`); schemaChanged = true; }
     }
+    if (schemaChanged) await this.persist();
 
     const seeded = queryOne<{id: string}>(
       db,

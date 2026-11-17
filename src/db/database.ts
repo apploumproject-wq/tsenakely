@@ -1538,7 +1538,16 @@ class TsenakelyDatabase {
     await this.init();
     if (!this.SQL) throw new Error('Moteur SQLite non disponible.');
     const candidate = new this.SQL.Database(bytes);
+    const previousDb = this.db;
     try {
+      const integrity = queryOne<{integrity_check: string}>(
+        candidate,
+        'PRAGMA integrity_check'
+      );
+      if (integrity?.integrity_check !== 'ok') {
+        throw new Error('Le contrôle d’intégrité SQLite a échoué.');
+      }
+
       const tables = queryAll<{name: string}>(
         candidate,
         `SELECT name FROM sqlite_master WHERE type='table'`
@@ -1558,11 +1567,15 @@ class TsenakelyDatabase {
           );
         }
       }
-      this.db?.close();
+
+      // Keep the current database alive until the imported copy is validated
+      // and durably written. On any failure, restore the original reference.
       this.db = candidate;
       await this.ensureSchemaAndSeed();
       await this.persist();
+      previousDb?.close();
     } catch (err) {
+      this.db = previousDb;
       candidate.close();
       throw err;
     }

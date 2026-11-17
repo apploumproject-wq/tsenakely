@@ -549,6 +549,7 @@ export const PosPage: React.FC<PosPageProps> = ({
               })}
             </div>
           )}
+          {filteredProducts.length > pageSize && <div className="mt-4 flex items-center justify-between"><span className="text-xs text-slate-500">Page {productPage + 1} / {pageCount}</span><div className="flex gap-2"><button type="button" disabled={productPage === 0} onClick={() => setProductPage((p) => Math.max(0, p - 1))} className="min-h-[38px] px-3 rounded-lg border border-slate-300 text-sm disabled:opacity-40">Précédent</button><button type="button" disabled={productPage >= pageCount - 1} onClick={() => setProductPage((p) => Math.min(pageCount - 1, p + 1))} className="min-h-[38px] px-3 rounded-lg border border-slate-300 text-sm disabled:opacity-40">Suivant</button></div></div>}
         </div>
 
         {/* Panier Desktop */}

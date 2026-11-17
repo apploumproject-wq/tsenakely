@@ -166,7 +166,8 @@ class TsenakelyDatabase {
     try {
       await this.initPromise;
     } catch (err) {
-      this.db?.close();
+      const dbToClose = this.db as Database | null;
+      if (dbToClose) dbToClose.close();
       this.db = null;
       this.SQL = null;
       this.initPromise = null;

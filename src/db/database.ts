@@ -685,6 +685,7 @@ class TsenakelyDatabase {
       price: number;
       stock_qty: number;
       min_stock: number;
+      image_data_url?: string | null;
     },
     actorName: string
   ): Promise<Product> {
@@ -718,9 +719,9 @@ class TsenakelyDatabase {
     transactionActive = true;
     try {
       db.run(
-        `INSERT INTO products (name, price, stock_qty, min_stock, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [name, Math.round(input.price), input.stock_qty, input.min_stock, now, now]
+        `INSERT INTO products (name, price, stock_qty, min_stock, image_data_url, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [name, Math.round(input.price), input.stock_qty, input.min_stock, input.image_data_url ?? null, now, now]
       );
       const row = queryOne<{id: number}>(db, `SELECT last_insert_rowid() as id`);
       const productId = row!.id;
@@ -757,6 +758,7 @@ class TsenakelyDatabase {
       name: string;
       price: number;
       min_stock: number;
+      image_data_url?: string | null;
     }
   ): Promise<void> {
     await this.init();
@@ -782,8 +784,8 @@ class TsenakelyDatabase {
     const now = new Date().toISOString();
     const previousSnapshot = db.export();
     db.run(
-      `UPDATE products SET name = ?, price = ?, min_stock = ?, updated_at = ? WHERE id = ?`,
-      [name, Math.round(input.price), input.min_stock, now, id]
+      `UPDATE products SET name = ?, price = ?, min_stock = ?, image_data_url = ?, updated_at = ? WHERE id = ?`,
+      [name, Math.round(input.price), input.min_stock, input.image_data_url ?? null, now, id]
     );
     await this.persistOrRestore(previousSnapshot);
   }
@@ -878,7 +880,8 @@ class TsenakelyDatabase {
   async createSale(
     user: User,
     items: CartItem[],
-    amountPaid: number
+    amountPaid: number,
+    customer?: {name?: string; phone?: string; email?: string; address?: string}
   ): Promise<SaleWithDetails> {
     await this.init();
     const db = this.getDb();

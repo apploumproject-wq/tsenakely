@@ -19,15 +19,29 @@ function openStorage(): Promise<IDBDatabase> {
       }
     };
 
+    let settled = false;
     request.onsuccess = () => {
       const db = request.result;
       db.onversionchange = () => db.close();
+      // A blocked open may later succeed after another tab closes. If the
+      // promise was already rejected, close this late connection immediately.
+      if (settled) {
+        db.close();
+        return;
+      }
+      settled = true;
       resolve(db);
     };
-    request.onerror = () =>
+    request.onerror = () => {
+      if (settled) return;
+      settled = true;
       reject(request.error ?? new Error('Erreur ouverture IndexedDB.'));
-    request.onblocked = () =>
-      reject(new Error('Ouverture IndexedDB bloquée par un autre onglet.'));
+    };
+    request.onblocked = () => {
+      if (settled) return;
+      settled = true;
+      reject(new Error('Ouverture IndexedDB bloquée par un autre onglet. Fermez les autres onglets TSENAKELY puis réessayez.'));
+    };
   });
 }
 

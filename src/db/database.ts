@@ -178,6 +178,7 @@ class TsenakelyDatabase {
     } catch (error) {
       if (this.SQL) {
         const previousDb = new this.SQL.Database(snapshot);
+        previousDb.run('PRAGMA foreign_keys = ON;');
         this.db?.close();
         this.db = previousDb;
       }
@@ -1621,8 +1622,11 @@ class TsenakelyDatabase {
     }
 
     const db = this.getDb();
+    const previousSnapshot = db.export();
+    let transactionActive = false;
     db.run('PRAGMA foreign_keys = OFF;');
     db.run('BEGIN TRANSACTION;');
+    transactionActive = true;
     try {
       db.run(`DELETE FROM sale_details`);
       db.run(`DELETE FROM sales`);
@@ -1780,11 +1784,14 @@ class TsenakelyDatabase {
       }
 
       db.run('COMMIT;');
+      transactionActive = false;
       db.run('PRAGMA foreign_keys = ON;');
-      await this.persist();
+      await this.persistOrRestore(previousSnapshot);
     } catch (err) {
-      db.run('ROLLBACK;');
-      db.run('PRAGMA foreign_keys = ON;');
+      if (transactionActive) {
+        db.run('ROLLBACK;');
+        db.run('PRAGMA foreign_keys = ON;');
+      }
       throw err;
     }
   }

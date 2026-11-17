@@ -15,6 +15,7 @@ export interface Product {
   price: number;
   stock_qty: number;
   min_stock: number;
+  image_data_url?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -34,6 +35,10 @@ export interface Sale {
   cancelled_at: string | null;
   cancelled_by: string | null;
   cancel_reason: string | null;
+  customer_name?: string | null;
+  customer_phone?: string | null;
+  customer_email?: string | null;
+  customer_address?: string | null;
   items_count?: number;
 }
 

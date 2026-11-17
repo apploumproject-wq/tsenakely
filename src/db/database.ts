@@ -263,6 +263,7 @@ class TsenakelyDatabase {
         price REAL NOT NULL CHECK(price >= 0),
         stock_qty INTEGER NOT NULL DEFAULT 0 CHECK(stock_qty >= 0),
         min_stock INTEGER NOT NULL DEFAULT 5 CHECK(min_stock >= 0),
+        image_data_url TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
@@ -279,7 +280,11 @@ class TsenakelyDatabase {
         status TEXT NOT NULL DEFAULT 'COMPLETED' CHECK(status IN ('COMPLETED', 'CANCELLED')),
         cancelled_at TEXT,
         cancelled_by TEXT,
-        cancel_reason TEXT
+        cancel_reason TEXT,
+        customer_name TEXT,
+        customer_phone TEXT,
+        customer_email TEXT,
+        customer_address TEXT
       );
 
       CREATE TABLE IF NOT EXISTS sale_details (
@@ -311,6 +316,13 @@ class TsenakelyDatabase {
       CREATE INDEX IF NOT EXISTS idx_sale_details_sale_id ON sale_details(sale_id);
       CREATE INDEX IF NOT EXISTS idx_stock_movements_created ON stock_movements(created_at);
     `);
+
+    const productColumns = queryAll<{name: string}>(db, `PRAGMA table_info(products)`).map((column) => column.name);
+    if (!productColumns.includes('image_data_url')) db.run(`ALTER TABLE products ADD COLUMN image_data_url TEXT`);
+    const saleColumns = queryAll<{name: string}>(db, `PRAGMA table_info(sales)`).map((column) => column.name);
+    for (const column of ['customer_name', 'customer_phone', 'customer_email', 'customer_address']) {
+      if (!saleColumns.includes(column)) db.run(`ALTER TABLE sales ADD COLUMN ${column} TEXT`);
+    }
 
     const seeded = queryOne<{id: string}>(
       db,

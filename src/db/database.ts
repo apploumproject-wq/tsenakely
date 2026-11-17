@@ -119,7 +119,26 @@ class TsenakelyDatabase {
             candidate,
             `SELECT name FROM sqlite_master WHERE type = 'table'`
           ).map((table) => table.name);
-          const required = ['users', 'products', 'sales', 'sale_details'];
+          const integrity = queryOne<{integrity_check: string}>(
+            candidate,
+            'PRAGMA integrity_check'
+          );
+          if (integrity?.integrity_check !== 'ok') {
+            candidate.close();
+            throw new Error(
+              'Le contrôle d’intégrité de la base SQLite enregistrée a échoué. Restaurez une sauvegarde valide avant de continuer.'
+            );
+          }
+
+          const required = [
+            'schema_migrations',
+            'app_settings',
+            'users',
+            'products',
+            'sales',
+            'sale_details',
+            'stock_movements',
+          ];
           const missing = required.filter((name) => !requiredTables.includes(name));
 
           if (missing.length > 0) {
@@ -176,11 +195,32 @@ class TsenakelyDatabase {
     try {
       await this.persist();
     } catch (error) {
-      if (this.SQL) {
+      try {
+        if (!this.SQL) {
+          throw new Error('Le moteur SQLite n’est plus disponible.');
+        }
+        // Build and validate the rollback copy before replacing the active handle.
         const previousDb = new this.SQL.Database(snapshot);
         previousDb.run('PRAGMA foreign_keys = ON;');
+        const integrity = queryOne<{integrity_check: string}>(
+          previousDb,
+          'PRAGMA integrity_check'
+        );
+        if (integrity?.integrity_check !== 'ok') {
+          previousDb.close();
+          throw new Error('La copie de restauration SQLite est invalide.');
+        }
         this.db?.close();
         this.db = previousDb;
+      } catch (restoreError) {
+        // Never continue serving reads/writes from a database whose durable
+        // save failed and whose in-memory rollback could not be verified.
+        this.db?.close();
+        this.db = null;
+        throw new Error(
+          'La sauvegarde locale a échoué et la restauration en mémoire a également échoué. TSENAKELY a bloqué les opérations pour éviter d’aggraver la perte de données. Ne fermez pas l’application avant d’avoir exporté/récupéré une sauvegarde si possible.',
+          {cause: restoreError}
+        );
       }
       throw new Error(
         'La sauvegarde locale a échoué. Les modifications de cette opération ont été annulées en mémoire ; vérifiez le stockage de votre appareil avant de réessayer.',
@@ -1579,6 +1619,8 @@ class TsenakelyDatabase {
       );
       const tableNames = new Set(tables.map((t) => t.name));
       const required = [
+        'schema_migrations',
+        'app_settings',
         'users',
         'products',
         'sales',

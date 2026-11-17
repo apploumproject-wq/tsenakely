@@ -1038,6 +1038,10 @@ class TsenakelyDatabase {
         cancelled_at: null,
         cancelled_by: null,
         cancel_reason: null,
+        customer_name: customer?.name?.trim() || null,
+        customer_phone: customer?.phone?.trim() || null,
+        customer_email: customer?.email?.trim() || null,
+        customer_address: customer?.address?.trim() || null,
         details,
       };
     } catch (err) {

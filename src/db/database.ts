@@ -168,6 +168,26 @@ class TsenakelyDatabase {
     await saveSqliteBytes(bytes);
   }
 
+  /**
+   * Restore the pre-operation snapshot if durable storage rejects a commit.
+   * IndexedDB writes are atomic; the in-memory copy must not get ahead of disk.
+   */
+  private async persistOrRestore(snapshot: Uint8Array): Promise<void> {
+    try {
+      await this.persist();
+    } catch (error) {
+      if (this.SQL) {
+        const previousDb = new this.SQL.Database(snapshot);
+        this.db?.close();
+        this.db = previousDb;
+      }
+      throw new Error(
+        'La sauvegarde locale a échoué. Les modifications de cette opération ont été annulées en mémoire ; vérifiez le stockage de votre appareil avant de réessayer.',
+        {cause: error}
+      );
+    }
+  }
+
   private async ensureSchemaAndSeed(): Promise<void> {
     const db = this.getDb();
     db.run('PRAGMA foreign_keys = ON;');
@@ -798,7 +818,10 @@ class TsenakelyDatabase {
     const now = new Date();
     const nowIso = now.toISOString();
 
+    const previousSnapshot = db.export();
+    let transactionActive = false;
     db.run('BEGIN TRANSACTION;');
+    transactionActive = true;
     try {
       let totalAmount = 0;
       const verifiedItems: Array<{
@@ -927,7 +950,8 @@ class TsenakelyDatabase {
       }
 
       db.run('COMMIT;');
-      await this.persist();
+      transactionActive = false;
+      await this.persistOrRestore(previousSnapshot);
 
       return {
         id: saleId,
@@ -945,7 +969,9 @@ class TsenakelyDatabase {
         details,
       };
     } catch (err) {
-      db.run('ROLLBACK;');
+      if (transactionActive) {
+        db.run('ROLLBACK;');
+      }
       throw err;
     }
   }

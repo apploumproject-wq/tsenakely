@@ -1,4 +1,5 @@
 import initSqlJs, {type Database, type SqlJsStatic} from 'sql.js';
+import sqlWasmUrl from 'sql.js/dist/sql-wasm.wasm?url';
 import {hashPassword, verifyPassword} from '../utils/crypto';
 import {loadSqliteBytes, saveSqliteBytes} from './storage';
 import type {
@@ -100,7 +101,7 @@ class TsenakelyDatabase {
 
     this.initPromise = (async () => {
       this.SQL = await initSqlJs({
-        locateFile: () => '/sql-wasm.wasm',
+        locateFile: () => sqlWasmUrl,
       });
 
       const savedBytes = await loadSqliteBytes();

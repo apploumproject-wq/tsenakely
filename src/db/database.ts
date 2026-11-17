@@ -957,17 +957,11 @@ class TsenakelyDatabase {
       const saleNumber = `VNT-${ymd}-${String(seq).padStart(4, '0')}`;
 
       db.run(
-        `INSERT INTO sales (sale_number, sale_date, user_id, user_name, total_amount, amount_paid, change_given, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'COMPLETED')`,
-        [
-          saleNumber,
-          nowIso,
-          user.id,
-          user.full_name,
-          totalAmount,
-          paidRounded,
-          changeGiven,
-        ]
+        `INSERT INTO sales (sale_number, sale_date, user_id, user_name, total_amount, amount_paid, change_given, status, customer_name, customer_phone, customer_email, customer_address)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'COMPLETED', ?, ?, ?, ?)`,
+        [saleNumber, nowIso, user.id, user.full_name, totalAmount, paidRounded, changeGiven,
+          customer?.name?.trim() || null, customer?.phone?.trim() || null,
+          customer?.email?.trim() || null, customer?.address?.trim() || null]
       );
 
       const saleIdRow = queryOne<{id: number}>(

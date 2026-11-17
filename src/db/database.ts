@@ -652,7 +652,10 @@ class TsenakelyDatabase {
     }
 
     const now = new Date().toISOString();
+    const previousSnapshot = db.export();
+    let transactionActive = false;
     db.run('BEGIN TRANSACTION;');
+    transactionActive = true;
     try {
       db.run(
         `INSERT INTO products (name, price, stock_qty, min_stock, created_at, updated_at)
@@ -669,7 +672,8 @@ class TsenakelyDatabase {
         );
       }
       db.run('COMMIT;');
-      await this.persist();
+      transactionActive = false;
+      await this.persistOrRestore(previousSnapshot);
       return {
         id: productId,
         name,
@@ -680,7 +684,9 @@ class TsenakelyDatabase {
         updated_at: now,
       };
     } catch (err) {
-      db.run('ROLLBACK;');
+      if (transactionActive) {
+        db.run('ROLLBACK;');
+      }
       throw err;
     }
   }
@@ -748,7 +754,10 @@ class TsenakelyDatabase {
     }
 
     const now = new Date().toISOString();
+    const previousSnapshot = db.export();
+    let transactionActive = false;
     db.run('BEGIN TRANSACTION;');
+    transactionActive = true;
     try {
       db.run(
         `UPDATE products SET stock_qty = ?, updated_at = ? WHERE id = ?`,
@@ -770,14 +779,17 @@ class TsenakelyDatabase {
         ]
       );
       db.run('COMMIT;');
-      await this.persist();
+      transactionActive = false;
+      await this.persistOrRestore(previousSnapshot);
       return {
         ...product,
         stock_qty: newQty,
         updated_at: now,
       };
     } catch (err) {
-      db.run('ROLLBACK;');
+      if (transactionActive) {
+        db.run('ROLLBACK;');
+      }
       throw err;
     }
   }
@@ -1087,7 +1099,10 @@ class TsenakelyDatabase {
     const db = this.getDb();
     const nowIso = new Date().toISOString();
 
+    const previousSnapshot = db.export();
+    let transactionActive = false;
     db.run('BEGIN TRANSACTION;');
+    transactionActive = true;
     try {
       const sale = queryOne<Sale>(db, `SELECT * FROM sales WHERE id = ?`, [
         saleId,
@@ -1145,9 +1160,12 @@ class TsenakelyDatabase {
       }
 
       db.run('COMMIT;');
-      await this.persist();
+      transactionActive = false;
+      await this.persistOrRestore(previousSnapshot);
     } catch (err) {
-      db.run('ROLLBACK;');
+      if (transactionActive) {
+        db.run('ROLLBACK;');
+      }
       throw err;
     }
   }
@@ -1510,7 +1528,10 @@ class TsenakelyDatabase {
       ['printer_device_name', next.printer_device_name || ''],
       ['printer_auto_print_sale', String(next.printer_auto_print_sale)],
     ];
+    const previousSnapshot = db.export();
+    let transactionActive = false;
     db.run('BEGIN TRANSACTION;');
+    transactionActive = true;
     try {
       for (const [k, v] of entries) {
         db.run(
@@ -1520,9 +1541,12 @@ class TsenakelyDatabase {
         );
       }
       db.run('COMMIT;');
-      await this.persist();
+      transactionActive = false;
+      await this.persistOrRestore(previousSnapshot);
     } catch (err) {
-      db.run('ROLLBACK;');
+      if (transactionActive) {
+        db.run('ROLLBACK;');
+      }
       throw err;
     }
   }

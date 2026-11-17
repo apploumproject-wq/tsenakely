@@ -160,27 +160,27 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
 
       {/* Cartes statistiques principales */}
       <section aria-label="Indicateurs clés">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
           {statCards.map((card) => {
             const Icon = card.icon;
             return (
               <div
                 key={card.label}
-                className="rounded-2xl bg-white border border-slate-200 p-5 flex items-start justify-between gap-4"
+                className="rounded-2xl bg-white border border-slate-200 p-3 sm:p-5 flex items-start justify-between gap-2 sm:gap-4 min-w-0"
               >
                 <div className="min-w-0">
-                  <p className="text-xs font-medium text-slate-500">
+                  <p className="text-[11px] sm:text-xs font-medium text-slate-500 leading-snug min-h-[2.25rem] sm:min-h-0">
                     {card.label}
                   </p>
-                  <p className="mt-2 text-2xl font-bold text-slate-900 font-mono-num truncate">
+                  <p className="mt-1 sm:mt-2 text-lg sm:text-2xl font-bold text-slate-900 font-mono-num truncate">
                     {card.value}
                   </p>
-                  <p className="mt-1 text-xs text-slate-500">{card.sub}</p>
+                  <p className="mt-1 text-[10px] sm:text-xs text-slate-500 leading-snug">{card.sub}</p>
                 </div>
                 <div
-                  className={`w-11 h-11 rounded-xl shrink-0 flex items-center justify-center ${card.tone}`}
+                  className={`w-8 h-8 sm:w-11 sm:h-11 rounded-lg sm:rounded-xl shrink-0 flex items-center justify-center ${card.tone}`}
                 >
-                  <Icon className="w-5 h-5" />
+                  <Icon className="w-4 h-4 sm:w-5 sm:h-5" />
                 </div>
               </div>
             );
@@ -226,11 +226,11 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
       )}
 
       {/* Graphique des 7 derniers jours */}
-      <section className="rounded-2xl bg-white border border-slate-200 p-5 sm:p-6">
-        <div className="flex items-center justify-between gap-4 mb-4">
+      <section className="rounded-2xl bg-white border border-slate-200 p-4 sm:p-6">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-4 mb-4">
           <div className="flex items-center gap-2.5">
             <TrendingUp className="w-5 h-5 text-[#2563EB]" />
-            <h2 className="text-base font-bold text-slate-900">
+            <h2 className="text-sm sm:text-base font-bold text-slate-900">
               Évolution des ventes (7 derniers jours)
             </h2>
           </div>

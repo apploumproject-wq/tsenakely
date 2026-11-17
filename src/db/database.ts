@@ -263,6 +263,7 @@ class TsenakelyDatabase {
         price REAL NOT NULL CHECK(price >= 0),
         stock_qty INTEGER NOT NULL DEFAULT 0 CHECK(stock_qty >= 0),
         min_stock INTEGER NOT NULL DEFAULT 5 CHECK(min_stock >= 0),
+        image_data_url TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
@@ -279,7 +280,11 @@ class TsenakelyDatabase {
         status TEXT NOT NULL DEFAULT 'COMPLETED' CHECK(status IN ('COMPLETED', 'CANCELLED')),
         cancelled_at TEXT,
         cancelled_by TEXT,
-        cancel_reason TEXT
+        cancel_reason TEXT,
+        customer_name TEXT,
+        customer_phone TEXT,
+        customer_email TEXT,
+        customer_address TEXT
       );
 
       CREATE TABLE IF NOT EXISTS sale_details (
@@ -311,6 +316,15 @@ class TsenakelyDatabase {
       CREATE INDEX IF NOT EXISTS idx_sale_details_sale_id ON sale_details(sale_id);
       CREATE INDEX IF NOT EXISTS idx_stock_movements_created ON stock_movements(created_at);
     `);
+
+    const productColumns = queryAll<{name: string}>(db, `PRAGMA table_info(products)`).map((column) => column.name);
+    const saleColumns = queryAll<{name: string}>(db, `PRAGMA table_info(sales)`).map((column) => column.name);
+    let schemaChanged = false;
+    if (!productColumns.includes('image_data_url')) { db.run(`ALTER TABLE products ADD COLUMN image_data_url TEXT`); schemaChanged = true; }
+    for (const column of ['customer_name', 'customer_phone', 'customer_email', 'customer_address']) {
+      if (!saleColumns.includes(column)) { db.run(`ALTER TABLE sales ADD COLUMN ${column} TEXT`); schemaChanged = true; }
+    }
+    if (schemaChanged) await this.persist();
 
     const seeded = queryOne<{id: string}>(
       db,
@@ -673,6 +687,7 @@ class TsenakelyDatabase {
       price: number;
       stock_qty: number;
       min_stock: number;
+      image_data_url?: string | null;
     },
     actorName: string
   ): Promise<Product> {
@@ -706,9 +721,9 @@ class TsenakelyDatabase {
     transactionActive = true;
     try {
       db.run(
-        `INSERT INTO products (name, price, stock_qty, min_stock, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [name, Math.round(input.price), input.stock_qty, input.min_stock, now, now]
+        `INSERT INTO products (name, price, stock_qty, min_stock, image_data_url, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [name, Math.round(input.price), input.stock_qty, input.min_stock, input.image_data_url ?? null, now, now]
       );
       const row = queryOne<{id: number}>(db, `SELECT last_insert_rowid() as id`);
       const productId = row!.id;
@@ -745,6 +760,7 @@ class TsenakelyDatabase {
       name: string;
       price: number;
       min_stock: number;
+      image_data_url?: string | null;
     }
   ): Promise<void> {
     await this.init();
@@ -770,8 +786,8 @@ class TsenakelyDatabase {
     const now = new Date().toISOString();
     const previousSnapshot = db.export();
     db.run(
-      `UPDATE products SET name = ?, price = ?, min_stock = ?, updated_at = ? WHERE id = ?`,
-      [name, Math.round(input.price), input.min_stock, now, id]
+      `UPDATE products SET name = ?, price = ?, min_stock = ?, image_data_url = ?, updated_at = ? WHERE id = ?`,
+      [name, Math.round(input.price), input.min_stock, input.image_data_url ?? null, now, id]
     );
     await this.persistOrRestore(previousSnapshot);
   }
@@ -866,7 +882,8 @@ class TsenakelyDatabase {
   async createSale(
     user: User,
     items: CartItem[],
-    amountPaid: number
+    amountPaid: number,
+    customer?: {name?: string; phone?: string; email?: string; address?: string}
   ): Promise<SaleWithDetails> {
     await this.init();
     const db = this.getDb();
@@ -942,17 +959,11 @@ class TsenakelyDatabase {
       const saleNumber = `VNT-${ymd}-${String(seq).padStart(4, '0')}`;
 
       db.run(
-        `INSERT INTO sales (sale_number, sale_date, user_id, user_name, total_amount, amount_paid, change_given, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'COMPLETED')`,
-        [
-          saleNumber,
-          nowIso,
-          user.id,
-          user.full_name,
-          totalAmount,
-          paidRounded,
-          changeGiven,
-        ]
+        `INSERT INTO sales (sale_number, sale_date, user_id, user_name, total_amount, amount_paid, change_given, status, customer_name, customer_phone, customer_email, customer_address)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'COMPLETED', ?, ?, ?, ?)`,
+        [saleNumber, nowIso, user.id, user.full_name, totalAmount, paidRounded, changeGiven,
+          customer?.name?.trim() || null, customer?.phone?.trim() || null,
+          customer?.email?.trim() || null, customer?.address?.trim() || null]
       );
 
       const saleIdRow = queryOne<{id: number}>(
@@ -1029,6 +1040,10 @@ class TsenakelyDatabase {
         cancelled_at: null,
         cancelled_by: null,
         cancel_reason: null,
+        customer_name: customer?.name?.trim() || null,
+        customer_phone: customer?.phone?.trim() || null,
+        customer_email: customer?.email?.trim() || null,
+        customer_address: customer?.address?.trim() || null,
         details,
       };
     } catch (err) {
@@ -1753,18 +1768,20 @@ class TsenakelyDatabase {
         price: number;
         stock_qty: number;
         min_stock: number;
+        image_data_url?: string | null;
         created_at: string;
         updated_at: string;
       }>) {
         db.run(
-          `INSERT INTO products (id, name, price, stock_qty, min_stock, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO products (id, name, price, stock_qty, min_stock, image_data_url, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             p.id,
             p.name,
             p.price,
             p.stock_qty,
             p.min_stock,
+            p.image_data_url ?? null,
             p.created_at,
             p.updated_at,
           ]
@@ -1784,10 +1801,14 @@ class TsenakelyDatabase {
         cancelled_at: string | null;
         cancelled_by: string | null;
         cancel_reason: string | null;
+        customer_name?: string | null;
+        customer_phone?: string | null;
+        customer_email?: string | null;
+        customer_address?: string | null;
       }>) {
         db.run(
-          `INSERT INTO sales (id, sale_number, sale_date, user_id, user_name, total_amount, amount_paid, change_given, status, cancelled_at, cancelled_by, cancel_reason)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO sales (id, sale_number, sale_date, user_id, user_name, total_amount, amount_paid, change_given, status, cancelled_at, cancelled_by, cancel_reason, customer_name, customer_phone, customer_email, customer_address)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             s.id,
             s.sale_number,
@@ -1801,6 +1822,10 @@ class TsenakelyDatabase {
             s.cancelled_at ?? null,
             s.cancelled_by ?? null,
             s.cancel_reason ?? null,
+            s.customer_name ?? null,
+            s.customer_phone ?? null,
+            s.customer_email ?? null,
+            s.customer_address ?? null,
           ]
         );
       }

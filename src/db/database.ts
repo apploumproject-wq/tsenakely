@@ -104,22 +104,52 @@ class TsenakelyDatabase {
       });
 
       const savedBytes = await loadSqliteBytes();
-      if (savedBytes && savedBytes.length > 0) {
+      let candidate: Database;
+
+      if (savedBytes !== null) {
+        if (savedBytes.byteLength === 0) {
+          throw new Error(
+            'Le fichier SQLite local est vide. Aucune réinitialisation automatique n’a été effectuée afin de protéger vos ventes.'
+          );
+        }
+
         try {
-          this.db = new this.SQL.Database(savedBytes);
-        } catch {
-          this.db = new this.SQL.Database();
+          candidate = new this.SQL.Database(savedBytes);
+          const requiredTables = queryAll<{name: string}>(
+            candidate,
+            `SELECT name FROM sqlite_master WHERE type = 'table'`
+          ).map((table) => table.name);
+          const required = ['users', 'products', 'sales', 'sale_details'];
+          const missing = required.filter((name) => !requiredTables.includes(name));
+
+          if (missing.length > 0) {
+            candidate.close();
+            throw new Error(
+              `La base SQLite enregistrée ne contient pas les tables attendues (${missing.join(', ')}). Restaurez une sauvegarde valide avant de continuer.`
+            );
+          }
+        } catch (error) {
+          if (error instanceof Error && error.message.includes('tables attendues')) {
+            throw error;
+          }
+          throw new Error(
+            'Impossible de lire la base SQLite enregistrée. Vos données n’ont pas été remplacées. Restaurez une sauvegarde valide avant de réessayer.'
+          );
         }
       } else {
-        this.db = new this.SQL.Database();
+        candidate = new this.SQL.Database();
       }
 
+      this.db = candidate;
       await this.ensureSchemaAndSeed();
     })();
 
     try {
       await this.initPromise;
     } catch (err) {
+      this.db?.close();
+      this.db = null;
+      this.SQL = null;
       this.initPromise = null;
       throw err;
     }

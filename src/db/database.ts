@@ -1753,18 +1753,20 @@ class TsenakelyDatabase {
         price: number;
         stock_qty: number;
         min_stock: number;
+        image_data_url?: string | null;
         created_at: string;
         updated_at: string;
       }>) {
         db.run(
-          `INSERT INTO products (id, name, price, stock_qty, min_stock, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO products (id, name, price, stock_qty, min_stock, image_data_url, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             p.id,
             p.name,
             p.price,
             p.stock_qty,
             p.min_stock,
+            p.image_data_url ?? null,
             p.created_at,
             p.updated_at,
           ]
@@ -1784,10 +1786,14 @@ class TsenakelyDatabase {
         cancelled_at: string | null;
         cancelled_by: string | null;
         cancel_reason: string | null;
+        customer_name?: string | null;
+        customer_phone?: string | null;
+        customer_email?: string | null;
+        customer_address?: string | null;
       }>) {
         db.run(
-          `INSERT INTO sales (id, sale_number, sale_date, user_id, user_name, total_amount, amount_paid, change_given, status, cancelled_at, cancelled_by, cancel_reason)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO sales (id, sale_number, sale_date, user_id, user_name, total_amount, amount_paid, change_given, status, cancelled_at, cancelled_by, cancel_reason, customer_name, customer_phone, customer_email, customer_address)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             s.id,
             s.sale_number,
@@ -1801,6 +1807,10 @@ class TsenakelyDatabase {
             s.cancelled_at ?? null,
             s.cancelled_by ?? null,
             s.cancel_reason ?? null,
+            s.customer_name ?? null,
+            s.customer_phone ?? null,
+            s.customer_email ?? null,
+            s.customer_address ?? null,
           ]
         );
       }

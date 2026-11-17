@@ -1,0 +1,34 @@
+
+name: Tests TSENAKELY
+
+on:
+  push:
+    branches:
+      - main
+      - audit/fix-storage-and-safety
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Recuperer le code
+        uses: actions/checkout@v4
+
+      - name: Installer Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Installer les dependances
+        run: npm install
+
+      - name: Verifier TypeScript
+        run: npm run lint
+
+      - name: Construire l'application
+        run: npm run build

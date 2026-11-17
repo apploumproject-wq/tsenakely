@@ -104,22 +104,72 @@ class TsenakelyDatabase {
       });
 
       const savedBytes = await loadSqliteBytes();
-      if (savedBytes && savedBytes.length > 0) {
+      let candidate: Database;
+
+      if (savedBytes !== null) {
+        if (savedBytes.byteLength === 0) {
+          throw new Error(
+            'Le fichier SQLite local est vide. Aucune réinitialisation automatique n’a été effectuée afin de protéger vos ventes.'
+          );
+        }
+
         try {
-          this.db = new this.SQL.Database(savedBytes);
-        } catch {
-          this.db = new this.SQL.Database();
+          candidate = new this.SQL.Database(savedBytes);
+          const requiredTables = queryAll<{name: string}>(
+            candidate,
+            `SELECT name FROM sqlite_master WHERE type = 'table'`
+          ).map((table) => table.name);
+          const integrity = queryOne<{integrity_check: string}>(
+            candidate,
+            'PRAGMA integrity_check'
+          );
+          if (integrity?.integrity_check !== 'ok') {
+            candidate.close();
+            throw new Error(
+              'Le contrôle d’intégrité de la base SQLite enregistrée a échoué. Restaurez une sauvegarde valide avant de continuer.'
+            );
+          }
+
+          const required = [
+            'schema_migrations',
+            'app_settings',
+            'users',
+            'products',
+            'sales',
+            'sale_details',
+            'stock_movements',
+          ];
+          const missing = required.filter((name) => !requiredTables.includes(name));
+
+          if (missing.length > 0) {
+            candidate.close();
+            throw new Error(
+              `La base SQLite enregistrée ne contient pas les tables attendues (${missing.join(', ')}). Restaurez une sauvegarde valide avant de continuer.`
+            );
+          }
+        } catch (error) {
+          if (error instanceof Error && error.message.includes('tables attendues')) {
+            throw error;
+          }
+          throw new Error(
+            'Impossible de lire la base SQLite enregistrée. Vos données n’ont pas été remplacées. Restaurez une sauvegarde valide avant de réessayer.'
+          );
         }
       } else {
-        this.db = new this.SQL.Database();
+        candidate = new this.SQL.Database();
       }
 
+      this.db = candidate;
       await this.ensureSchemaAndSeed();
     })();
 
     try {
       await this.initPromise;
     } catch (err) {
+      const dbToClose = this.db as Database | null;
+      if (dbToClose) dbToClose.close();
+      this.db = null;
+      this.SQL = null;
       this.initPromise = null;
       throw err;
     }
@@ -136,6 +186,49 @@ class TsenakelyDatabase {
     const db = this.getDb();
     const bytes = db.export();
     await saveSqliteBytes(bytes);
+  }
+
+  /**
+   * Restore the pre-operation snapshot if durable storage rejects a commit.
+   * IndexedDB writes are atomic; the in-memory copy must not get ahead of disk.
+   */
+  private async persistOrRestore(snapshot: Uint8Array): Promise<void> {
+    try {
+      await this.persist();
+    } catch (error) {
+      try {
+        if (!this.SQL) {
+          throw new Error('Le moteur SQLite n’est plus disponible.');
+        }
+        // Build and validate the rollback copy before replacing the active handle.
+        const previousDb = new this.SQL.Database(snapshot);
+        previousDb.run('PRAGMA foreign_keys = ON;');
+        const integrity = queryOne<{integrity_check: string}>(
+          previousDb,
+          'PRAGMA integrity_check'
+        );
+        if (integrity?.integrity_check !== 'ok') {
+          previousDb.close();
+          throw new Error('La copie de restauration SQLite est invalide.');
+        }
+        this.db?.close();
+        this.db = previousDb;
+      } catch (restoreError) {
+        // Never continue serving reads/writes from a database whose durable
+        // save failed and whose in-memory rollback could not be verified.
+        this.db?.close();
+        this.db = null;
+        this.initPromise = null;
+        throw new Error(
+          'La sauvegarde locale a échoué et la restauration en mémoire a également échoué. TSENAKELY a bloqué les opérations pour éviter d’aggraver la perte de données. Vérifiez le stockage et rechargez l’application avant de reprendre les opérations.',
+          {cause: restoreError}
+        );
+      }
+      throw new Error(
+        'La sauvegarde locale a échoué. Les modifications de cette opération ont été annulées en mémoire ; vérifiez le stockage de votre appareil avant de réessayer.',
+        {cause: error}
+      );
+    }
   }
 
   private async ensureSchemaAndSeed(): Promise<void> {
@@ -407,13 +500,14 @@ class TsenakelyDatabase {
 
     const hash = await hashPassword(input.password);
     const now = new Date().toISOString();
+    const previousSnapshot = db.export();
     db.run(
       `INSERT INTO users (username, full_name, role, password_hash, is_active, created_at)
        VALUES (?, ?, ?, ?, 1, ?)`,
       [username, fullName, input.role, hash, now]
     );
     const created = queryOne<{id: number}>(db, `SELECT last_insert_rowid() as id`);
-    await this.persist();
+    await this.persistOrRestore(previousSnapshot);
     return {
       id: created!.id,
       username,
@@ -481,11 +575,12 @@ class TsenakelyDatabase {
       }
     }
 
+    const previousSnapshot = db.export();
     db.run(
       `UPDATE users SET username = ?, full_name = ?, role = ?, is_active = ? WHERE id = ?`,
       [username, fullName, input.role, input.is_active ? 1 : 0, id]
     );
-    await this.persist();
+    await this.persistOrRestore(previousSnapshot);
   }
 
   async resetUserPassword(id: number, newPassword: string): Promise<void> {
@@ -495,8 +590,9 @@ class TsenakelyDatabase {
     }
     const db = this.getDb();
     const hash = await hashPassword(newPassword);
+    const previousSnapshot = db.export();
     db.run(`UPDATE users SET password_hash = ? WHERE id = ?`, [hash, id]);
-    await this.persist();
+    await this.persistOrRestore(previousSnapshot);
   }
 
   async changeOwnPassword(
@@ -522,8 +618,9 @@ class TsenakelyDatabase {
       throw new Error('Le mot de passe actuel est incorrect.');
     }
     const hash = await hashPassword(newPassword);
+    const previousSnapshot = db.export();
     db.run(`UPDATE users SET password_hash = ? WHERE id = ?`, [hash, userId]);
-    await this.persist();
+    await this.persistOrRestore(previousSnapshot);
   }
 
   async deleteUser(id: number, currentAdminId: number): Promise<void> {
@@ -548,8 +645,9 @@ class TsenakelyDatabase {
         throw new Error('Impossible de supprimer le dernier administrateur.');
       }
     }
+    const previousSnapshot = db.export();
     db.run(`DELETE FROM users WHERE id = ?`, [id]);
-    await this.persist();
+    await this.persistOrRestore(previousSnapshot);
   }
 
   // ===================== PRODUITS & STOCKS =====================
@@ -601,7 +699,10 @@ class TsenakelyDatabase {
     }
 
     const now = new Date().toISOString();
+    const previousSnapshot = db.export();
+    let transactionActive = false;
     db.run('BEGIN TRANSACTION;');
+    transactionActive = true;
     try {
       db.run(
         `INSERT INTO products (name, price, stock_qty, min_stock, created_at, updated_at)
@@ -618,7 +719,8 @@ class TsenakelyDatabase {
         );
       }
       db.run('COMMIT;');
-      await this.persist();
+      transactionActive = false;
+      await this.persistOrRestore(previousSnapshot);
       return {
         id: productId,
         name,
@@ -629,7 +731,9 @@ class TsenakelyDatabase {
         updated_at: now,
       };
     } catch (err) {
-      db.run('ROLLBACK;');
+      if (transactionActive) {
+        db.run('ROLLBACK;');
+      }
       throw err;
     }
   }
@@ -663,11 +767,12 @@ class TsenakelyDatabase {
     }
 
     const now = new Date().toISOString();
+    const previousSnapshot = db.export();
     db.run(
       `UPDATE products SET name = ?, price = ?, min_stock = ?, updated_at = ? WHERE id = ?`,
       [name, Math.round(input.price), input.min_stock, now, id]
     );
-    await this.persist();
+    await this.persistOrRestore(previousSnapshot);
   }
 
   async adjustStock(
@@ -697,7 +802,10 @@ class TsenakelyDatabase {
     }
 
     const now = new Date().toISOString();
+    const previousSnapshot = db.export();
+    let transactionActive = false;
     db.run('BEGIN TRANSACTION;');
+    transactionActive = true;
     try {
       db.run(
         `UPDATE products SET stock_qty = ?, updated_at = ? WHERE id = ?`,
@@ -719,14 +827,17 @@ class TsenakelyDatabase {
         ]
       );
       db.run('COMMIT;');
-      await this.persist();
+      transactionActive = false;
+      await this.persistOrRestore(previousSnapshot);
       return {
         ...product,
         stock_qty: newQty,
         updated_at: now,
       };
     } catch (err) {
-      db.run('ROLLBACK;');
+      if (transactionActive) {
+        db.run('ROLLBACK;');
+      }
       throw err;
     }
   }
@@ -734,8 +845,9 @@ class TsenakelyDatabase {
   async deleteProduct(id: number): Promise<void> {
     await this.init();
     const db = this.getDb();
+    const previousSnapshot = db.export();
     db.run(`DELETE FROM products WHERE id = ?`, [id]);
-    await this.persist();
+    await this.persistOrRestore(previousSnapshot);
   }
 
   async getStockMovements(limit = 100): Promise<StockMovement[]> {
@@ -768,7 +880,10 @@ class TsenakelyDatabase {
     const now = new Date();
     const nowIso = now.toISOString();
 
+    const previousSnapshot = db.export();
+    let transactionActive = false;
     db.run('BEGIN TRANSACTION;');
+    transactionActive = true;
     try {
       let totalAmount = 0;
       const verifiedItems: Array<{
@@ -897,7 +1012,8 @@ class TsenakelyDatabase {
       }
 
       db.run('COMMIT;');
-      await this.persist();
+      transactionActive = false;
+      await this.persistOrRestore(previousSnapshot);
 
       return {
         id: saleId,
@@ -915,7 +1031,9 @@ class TsenakelyDatabase {
         details,
       };
     } catch (err) {
-      db.run('ROLLBACK;');
+      if (transactionActive) {
+        db.run('ROLLBACK;');
+      }
       throw err;
     }
   }
@@ -1030,7 +1148,10 @@ class TsenakelyDatabase {
     const db = this.getDb();
     const nowIso = new Date().toISOString();
 
+    const previousSnapshot = db.export();
+    let transactionActive = false;
     db.run('BEGIN TRANSACTION;');
+    transactionActive = true;
     try {
       const sale = queryOne<Sale>(db, `SELECT * FROM sales WHERE id = ?`, [
         saleId,
@@ -1088,9 +1209,12 @@ class TsenakelyDatabase {
       }
 
       db.run('COMMIT;');
-      await this.persist();
+      transactionActive = false;
+      await this.persistOrRestore(previousSnapshot);
     } catch (err) {
-      db.run('ROLLBACK;');
+      if (transactionActive) {
+        db.run('ROLLBACK;');
+      }
       throw err;
     }
   }
@@ -1453,7 +1577,10 @@ class TsenakelyDatabase {
       ['printer_device_name', next.printer_device_name || ''],
       ['printer_auto_print_sale', String(next.printer_auto_print_sale)],
     ];
+    const previousSnapshot = db.export();
+    let transactionActive = false;
     db.run('BEGIN TRANSACTION;');
+    transactionActive = true;
     try {
       for (const [k, v] of entries) {
         db.run(
@@ -1463,9 +1590,12 @@ class TsenakelyDatabase {
         );
       }
       db.run('COMMIT;');
-      await this.persist();
+      transactionActive = false;
+      await this.persistOrRestore(previousSnapshot);
     } catch (err) {
-      db.run('ROLLBACK;');
+      if (transactionActive) {
+        db.run('ROLLBACK;');
+      }
       throw err;
     }
   }
@@ -1482,13 +1612,24 @@ class TsenakelyDatabase {
     await this.init();
     if (!this.SQL) throw new Error('Moteur SQLite non disponible.');
     const candidate = new this.SQL.Database(bytes);
+    const previousDb = this.db;
     try {
+      const integrity = queryOne<{integrity_check: string}>(
+        candidate,
+        'PRAGMA integrity_check'
+      );
+      if (integrity?.integrity_check !== 'ok') {
+        throw new Error('Le contrôle d’intégrité SQLite a échoué.');
+      }
+
       const tables = queryAll<{name: string}>(
         candidate,
         `SELECT name FROM sqlite_master WHERE type='table'`
       );
       const tableNames = new Set(tables.map((t) => t.name));
       const required = [
+        'schema_migrations',
+        'app_settings',
         'users',
         'products',
         'sales',
@@ -1502,11 +1643,15 @@ class TsenakelyDatabase {
           );
         }
       }
-      this.db?.close();
+
+      // Keep the current database alive until the imported copy is validated
+      // and durably written. On any failure, restore the original reference.
       this.db = candidate;
       await this.ensureSchemaAndSeed();
       await this.persist();
+      previousDb?.close();
     } catch (err) {
+      this.db = previousDb;
       candidate.close();
       throw err;
     }
@@ -1552,8 +1697,11 @@ class TsenakelyDatabase {
     }
 
     const db = this.getDb();
+    const previousSnapshot = db.export();
+    let transactionActive = false;
     db.run('PRAGMA foreign_keys = OFF;');
     db.run('BEGIN TRANSACTION;');
+    transactionActive = true;
     try {
       db.run(`DELETE FROM sale_details`);
       db.run(`DELETE FROM sales`);
@@ -1711,11 +1859,14 @@ class TsenakelyDatabase {
       }
 
       db.run('COMMIT;');
+      transactionActive = false;
       db.run('PRAGMA foreign_keys = ON;');
-      await this.persist();
+      await this.persistOrRestore(previousSnapshot);
     } catch (err) {
-      db.run('ROLLBACK;');
-      db.run('PRAGMA foreign_keys = ON;');
+      if (transactionActive) {
+        db.run('ROLLBACK;');
+        db.run('PRAGMA foreign_keys = ON;');
+      }
       throw err;
     }
   }

@@ -154,7 +154,7 @@ export async function generateSalesExcelWorkbook(
     const timeStr = formatTimeOnly(sale.sale_date);
     const statusLabel = sale.status === 'COMPLETED' ? 'Validée' : 'Annulée';
 
-    for (const detail of sale.details) {
+    for (const [detailIndex, detail] of sale.details.entries()) {
       histRowCount++;
       totalLineQty += detail.quantity;
       const row = sheetHistory.addRow([
@@ -166,8 +166,9 @@ export async function generateSalesExcelWorkbook(
         detail.quantity,
         detail.unit_price,
         detail.subtotal,
-        sale.amount_paid,
-        sale.change_given,
+        // These are sale-level amounts: show them once, not once per product.
+        detailIndex === 0 ? sale.amount_paid : null,
+        detailIndex === 0 ? sale.change_given : null,
         statusLabel,
       ]);
 

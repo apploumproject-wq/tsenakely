@@ -499,13 +499,14 @@ class TsenakelyDatabase {
 
     const hash = await hashPassword(input.password);
     const now = new Date().toISOString();
+    const previousSnapshot = db.export();
     db.run(
       `INSERT INTO users (username, full_name, role, password_hash, is_active, created_at)
        VALUES (?, ?, ?, ?, 1, ?)`,
       [username, fullName, input.role, hash, now]
     );
     const created = queryOne<{id: number}>(db, `SELECT last_insert_rowid() as id`);
-    await this.persist();
+    await this.persistOrRestore(previousSnapshot);
     return {
       id: created!.id,
       username,
@@ -573,11 +574,12 @@ class TsenakelyDatabase {
       }
     }
 
+    const previousSnapshot = db.export();
     db.run(
       `UPDATE users SET username = ?, full_name = ?, role = ?, is_active = ? WHERE id = ?`,
       [username, fullName, input.role, input.is_active ? 1 : 0, id]
     );
-    await this.persist();
+    await this.persistOrRestore(previousSnapshot);
   }
 
   async resetUserPassword(id: number, newPassword: string): Promise<void> {
@@ -587,8 +589,9 @@ class TsenakelyDatabase {
     }
     const db = this.getDb();
     const hash = await hashPassword(newPassword);
+    const previousSnapshot = db.export();
     db.run(`UPDATE users SET password_hash = ? WHERE id = ?`, [hash, id]);
-    await this.persist();
+    await this.persistOrRestore(previousSnapshot);
   }
 
   async changeOwnPassword(
@@ -614,8 +617,9 @@ class TsenakelyDatabase {
       throw new Error('Le mot de passe actuel est incorrect.');
     }
     const hash = await hashPassword(newPassword);
+    const previousSnapshot = db.export();
     db.run(`UPDATE users SET password_hash = ? WHERE id = ?`, [hash, userId]);
-    await this.persist();
+    await this.persistOrRestore(previousSnapshot);
   }
 
   async deleteUser(id: number, currentAdminId: number): Promise<void> {
@@ -640,8 +644,9 @@ class TsenakelyDatabase {
         throw new Error('Impossible de supprimer le dernier administrateur.');
       }
     }
+    const previousSnapshot = db.export();
     db.run(`DELETE FROM users WHERE id = ?`, [id]);
-    await this.persist();
+    await this.persistOrRestore(previousSnapshot);
   }
 
   // ===================== PRODUITS & STOCKS =====================
@@ -761,11 +766,12 @@ class TsenakelyDatabase {
     }
 
     const now = new Date().toISOString();
+    const previousSnapshot = db.export();
     db.run(
       `UPDATE products SET name = ?, price = ?, min_stock = ?, updated_at = ? WHERE id = ?`,
       [name, Math.round(input.price), input.min_stock, now, id]
     );
-    await this.persist();
+    await this.persistOrRestore(previousSnapshot);
   }
 
   async adjustStock(
@@ -838,8 +844,9 @@ class TsenakelyDatabase {
   async deleteProduct(id: number): Promise<void> {
     await this.init();
     const db = this.getDb();
+    const previousSnapshot = db.export();
     db.run(`DELETE FROM products WHERE id = ?`, [id]);
-    await this.persist();
+    await this.persistOrRestore(previousSnapshot);
   }
 
   async getStockMovements(limit = 100): Promise<StockMovement[]> {

@@ -1,0 +1,6 @@
+{
+  "name": "TSENAKELY",
+  "description": "Application de gestion commerciale hors ligne — ventes, produits, stocks et statistiques en Ariary malgache (Ar).",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

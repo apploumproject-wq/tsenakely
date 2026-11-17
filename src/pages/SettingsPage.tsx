@@ -92,6 +92,8 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
   const [prodPrice, setProdPrice] = useState('');
   const [prodStock, setProdStock] = useState('10');
   const [prodMinStock, setProdMinStock] = useState('5');
+  const [prodImage, setProdImage] = useState<string | null>(null);
+  const productImageInputRef = useRef<HTMLInputElement | null>(null);
 
   const [stockModalProduct, setStockModalProduct] = useState<Product | null>(
     null
@@ -173,6 +175,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
     setProdPrice('');
     setProdStock('10');
     setProdMinStock('5');
+    setProdImage(null);
     setProductModalOpen(true);
   };
 
@@ -182,6 +185,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
     setProdPrice(String(p.price));
     setProdStock(String(p.stock_qty));
     setProdMinStock(String(p.min_stock));
+    setProdImage(p.image_data_url ?? null);
     setProductModalOpen(true);
   };
 
@@ -196,6 +200,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
           name: prodName,
           price,
           min_stock: minStock,
+          image_data_url: prodImage,
         });
         showMessage('success', `Produit « ${prodName} » mis à jour.`);
       } else {
@@ -206,6 +211,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
             price,
             stock_qty: stockQty,
             min_stock: minStock,
+            image_data_url: prodImage,
           },
           currentUser.full_name
         );
@@ -1610,6 +1616,41 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
             </div>
 
             <form onSubmit={handleSaveProduct} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-2">Photo du produit (facultatif · carré 500 × 500 px)</label>
+                <input ref={productImageInputRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  if (file.size > 8 * 1024 * 1024) { showMessage('error', 'Image trop volumineuse (8 Mo maximum).'); e.target.value = ''; return; }
+                  const reader = new FileReader();
+                  reader.onload = () => {
+                    const image = new Image();
+                    image.onload = () => {
+                      const canvas = document.createElement('canvas'); canvas.width = 500; canvas.height = 500;
+                      const ctx = canvas.getContext('2d');
+                      if (!ctx) { showMessage('error', 'Impossible de traiter cette image.'); return; }
+                      const scale = Math.max(500 / image.width, 500 / image.height);
+                      const width = image.width * scale, height = image.height * scale;
+                      ctx.drawImage(image, (500 - width) / 2, (500 - height) / 2, width, height);
+                      setProdImage(canvas.toDataURL('image/jpeg', 0.82));
+                    };
+                    image.onerror = () => showMessage('error', 'Format image illisible.');
+                    image.src = String(reader.result);
+                  };
+                  reader.readAsDataURL(file);
+                }} />
+                <div className="flex items-center gap-3">
+                  <div className="w-24 h-24 rounded-xl border border-slate-200 bg-slate-50 overflow-hidden flex items-center justify-center">
+                    {prodImage ? <img src={prodImage} alt="Aperçu du produit" className="w-full h-full object-cover" /> : <span className="text-xs text-slate-400">Aucune photo</span>}
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <button type="button" onClick={() => productImageInputRef.current?.click()} className="min-h-[40px] px-3 rounded-lg border border-slate-300 text-sm font-medium">Choisir une photo</button>
+                    {prodImage && <button type="button" onClick={() => {setProdImage(null); if(productImageInputRef.current) productImageInputRef.current.value='';}} className="text-xs text-red-600 text-left">Supprimer la photo</button>}
+                    <span className="text-xs text-slate-500">JPG, PNG ou WebP · 8 Mo max.</span>
+                  </div>
+                </div>
+              </div>
+
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
                   Nom du produit

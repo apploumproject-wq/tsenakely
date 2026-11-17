@@ -38,6 +38,11 @@ export const PosPage: React.FC<PosPageProps> = ({
 }) => {
   const [products, setProducts] = useState<Product[]>([]);
   const [search, setSearch] = useState('');
+  const [productPage, setProductPage] = useState(0);
+  const [customerName, setCustomerName] = useState('');
+  const [customerPhone, setCustomerPhone] = useState('');
+  const [customerEmail, setCustomerEmail] = useState('');
+  const [customerAddress, setCustomerAddress] = useState('');
   const [cart, setCart] = useState<CartItem[]>([]);
   const [amountPaidText, setAmountPaidText] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -82,6 +87,11 @@ export const PosPage: React.FC<PosPageProps> = ({
     if (!q) return products;
     return products.filter((p) => p.name.toLowerCase().includes(q));
   }, [products, search]);
+  useEffect(() => { setProductPage(0); }, [search]);
+
+  const pageSize = 4;
+  const pageCount = Math.max(1, Math.ceil(filteredProducts.length / pageSize));
+  const visibleProducts = filteredProducts.slice(productPage * pageSize, (productPage + 1) * pageSize);
 
   const cartTotal = useMemo(
     () =>
@@ -190,10 +200,12 @@ export const PosPage: React.FC<PosPageProps> = ({
       const created = await tsenakelyDb.createSale(
         currentUser,
         cart,
-        numericAmountPaid
+        numericAmountPaid,
+        {name: customerName, phone: customerPhone, email: customerEmail, address: customerAddress}
       );
       setCart([]);
       setAmountPaidText('');
+      setCustomerName(''); setCustomerPhone(''); setCustomerEmail(''); setCustomerAddress('');
       setMobileCartOpen(false);
       setCompletedSale(created);
       await loadProducts();
@@ -340,6 +352,7 @@ export const PosPage: React.FC<PosPageProps> = ({
         )}
       </div>
 
+      <div className="border-t border-slate-200 p-4 space-y-2.5"><p className="text-sm font-semibold text-slate-800">Informations de l'acheteur (facultatif)</p><input aria-label="Nom de l'acheteur" value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="Nom et prénom (facultatif)" className="w-full min-h-[40px] px-3 rounded-lg border border-slate-300 text-sm" /><input aria-label="Téléphone" value={customerPhone} onChange={(e) => setCustomerPhone(e.target.value)} placeholder="Téléphone (facultatif)" className="w-full min-h-[40px] px-3 rounded-lg border border-slate-300 text-sm" /><input aria-label="E-mail" type="email" value={customerEmail} onChange={(e) => setCustomerEmail(e.target.value)} placeholder="E-mail (facultatif)" className="w-full min-h-[40px] px-3 rounded-lg border border-slate-300 text-sm" /><input aria-label="Adresse" value={customerAddress} onChange={(e) => setCustomerAddress(e.target.value)} placeholder="Adresse (facultatif)" className="w-full min-h-[40px] px-3 rounded-lg border border-slate-300 text-sm" /></div>
       {/* Récapitulatif, paiement et monnaie */}
       <div className="border-t border-slate-200 bg-slate-50/70 p-5 space-y-4">
         <div className="flex items-center justify-between">
@@ -480,8 +493,8 @@ export const PosPage: React.FC<PosPageProps> = ({
               </p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3.5">
-              {filteredProducts.map((product) => {
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+              {visibleProducts.map((product) => {
                 const inCartQty = getCartQuantity(product.id);
                 const outOfStock = product.stock_qty === 0;
                 const lowStock =
@@ -501,6 +514,7 @@ export const PosPage: React.FC<PosPageProps> = ({
                         : 'bg-white border-slate-200 hover:border-[#0F294A] active:scale-[0.99] cursor-pointer'
                     }`}
                   >
+                    {product.image_data_url && <img src={product.image_data_url} alt={product.name} loading="lazy" className="w-full aspect-square max-h-36 object-cover rounded-xl mb-3" />}
                     <div className="flex items-start justify-between gap-2">
                       <h3 className="text-sm font-bold text-slate-900 leading-snug">
                         {product.name}

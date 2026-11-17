@@ -100,6 +100,21 @@ export function buildInvoicePdf(
   doc.setLineWidth(0.4);
   doc.line(margin, separatorY, pageWidth - margin, separatorY);
 
+  let tableStartY = separatorY + 6;
+  const customerLines = [
+    sale.customer_name ? `Acheteur : ${sale.customer_name}` : '',
+    sale.customer_phone ? `Téléphone : ${sale.customer_phone}` : '',
+    sale.customer_email ? `E-mail : ${sale.customer_email}` : '',
+    sale.customer_address ? `Adresse : ${sale.customer_address}` : '',
+  ].filter(Boolean);
+  if (customerLines.length > 0) {
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(15, 41, 74);
+    doc.text('INFORMATIONS ACHETEUR', margin, separatorY + 6);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(71, 85, 105);
+    customerLines.forEach((line, index) => doc.text(line, margin, separatorY + 11 + index * 4));
+    tableStartY = separatorY + 16 + customerLines.length * 4;
+  }
+
   // Tableau des produits vendus
   const tableRows = sale.details.map((item, idx) => [
     String(idx + 1),
@@ -110,7 +125,7 @@ export function buildInvoicePdf(
   ]);
 
   autoTable(doc, {
-    startY: separatorY + 6,
+    startY: tableStartY,
     margin: {left: margin, right: margin},
     head: [['#', 'Produit', 'Quantité', 'Prix unitaire', 'Sous-total']],
     body: tableRows,

@@ -217,8 +217,9 @@ class TsenakelyDatabase {
         // save failed and whose in-memory rollback could not be verified.
         this.db?.close();
         this.db = null;
+        this.initPromise = null;
         throw new Error(
-          'La sauvegarde locale a échoué et la restauration en mémoire a également échoué. TSENAKELY a bloqué les opérations pour éviter d’aggraver la perte de données. Ne fermez pas l’application avant d’avoir exporté/récupéré une sauvegarde si possible.',
+          'La sauvegarde locale a échoué et la restauration en mémoire a également échoué. TSENAKELY a bloqué les opérations pour éviter d’aggraver la perte de données. Vérifiez le stockage et rechargez l’application avant de reprendre les opérations.',
           {cause: restoreError}
         );
       }

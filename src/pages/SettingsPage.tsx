@@ -89,6 +89,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
   const [productModalOpen, setProductModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [prodName, setProdName] = useState('');
+  const [prodCategory, setProdCategory] = useState('Autres');
   const [prodPrice, setProdPrice] = useState('');
   const [prodStock, setProdStock] = useState('10');
   const [prodMinStock, setProdMinStock] = useState('5');
@@ -172,6 +173,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
   const openAddProduct = () => {
     setEditingProduct(null);
     setProdName('');
+    setProdCategory('Autres');
     setProdPrice('');
     setProdStock('10');
     setProdMinStock('5');
@@ -182,6 +184,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
   const openEditProduct = (p: Product) => {
     setEditingProduct(p);
     setProdName(p.name);
+    setProdCategory(p.category || 'Autres');
     setProdPrice(String(p.price));
     setProdStock(String(p.stock_qty));
     setProdMinStock(String(p.min_stock));
@@ -201,6 +204,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
           price,
           min_stock: minStock,
           image_data_url: prodImage,
+          category: prodCategory,
         });
         showMessage('success', `Produit « ${prodName} » mis à jour.`);
       } else {
@@ -212,6 +216,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
             stock_qty: stockQty,
             min_stock: minStock,
             image_data_url: prodImage,
+            category: prodCategory,
           },
           currentUser.full_name
         );
@@ -804,6 +809,9 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
                     <th className="text-left px-5 py-3.5 font-semibold">
                       Produit
                     </th>
+                    <th className="text-left px-4 py-3.5 font-semibold">
+                      Catégorie
+                    </th>
                     <th className="text-right px-4 py-3.5 font-semibold">
                       Prix de vente
                     </th>
@@ -827,7 +835,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
                   {products.length === 0 ? (
                     <tr>
                       <td
-                        colSpan={isAdmin ? 6 : 5}
+                        colSpan={isAdmin ? 7 : 6}
                         className="px-5 py-10 text-center text-sm text-slate-500"
                       >
                         Aucun produit trouvé.
@@ -841,6 +849,9 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
                         <tr key={p.id} className="hover:bg-slate-50/70">
                           <td className="px-5 py-3.5 font-semibold text-slate-900">
                             {p.name}
+                          </td>
+                          <td className="px-4 py-3.5 text-sm text-slate-600">
+                            {p.category || 'Autres'}
                           </td>
                           <td className="px-4 py-3.5 text-right font-mono-num font-bold text-[#0F294A]">
                             {formatAriary(p.price, currency)}
@@ -1663,6 +1674,28 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
                   placeholder="Ex. Glace double"
                   className="w-full min-h-[44px] px-3.5 py-2 rounded-xl border border-slate-300 text-sm focus:outline-none focus:border-[#0F294A]"
                 />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Catégorie
+                </label>
+                <input
+                  type="text"
+                  required
+                  list="tsenakely-product-categories"
+                  value={prodCategory}
+                  onChange={(e) => setProdCategory(e.target.value)}
+                  placeholder="Ex. Boissons, Glaces, Pâtisserie"
+                  className="w-full min-h-[44px] px-3.5 py-2 rounded-xl border border-slate-300 text-sm focus:outline-none focus:border-[#0F294A]"
+                />
+                <datalist id="tsenakely-product-categories">
+                  <option value="Boissons" />
+                  <option value="Glaces" />
+                  <option value="Pâtisserie" />
+                  <option value="Snacks" />
+                  <option value="Autres" />
+                </datalist>
               </div>
 
               <div>

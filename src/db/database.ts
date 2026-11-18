@@ -26,12 +26,13 @@ const INITIAL_PRODUCTS: Array<{
   price: number;
   stock_qty: number;
   min_stock: number;
+  category: string;
 }> = [
-  {name: 'Glace double', price: 3000, stock_qty: 25, min_stock: 5},
-  {name: 'Glace simple', price: 1500, stock_qty: 30, min_stock: 5},
-  {name: 'Popcorn', price: 2000, stock_qty: 20, min_stock: 5},
-  {name: 'Pain ordoeuvre GM', price: 2000, stock_qty: 15, min_stock: 4},
-  {name: 'Pain ordoeuvre PM', price: 1500, stock_qty: 20, min_stock: 5},
+  {name: 'Glace double', price: 3000, stock_qty: 25, min_stock: 5, category: 'Glaces'},
+  {name: 'Glace simple', price: 1500, stock_qty: 30, min_stock: 5, category: 'Glaces'},
+  {name: 'Popcorn', price: 2000, stock_qty: 20, min_stock: 5, category: 'Snacks'},
+  {name: 'Pain ordoeuvre GM', price: 2000, stock_qty: 15, min_stock: 4, category: 'Pâtisserie'},
+  {name: 'Pain ordoeuvre PM', price: 1500, stock_qty: 20, min_stock: 5, category: 'Pâtisserie'},
 ];
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -264,6 +265,7 @@ class TsenakelyDatabase {
         stock_qty INTEGER NOT NULL DEFAULT 0 CHECK(stock_qty >= 0),
         min_stock INTEGER NOT NULL DEFAULT 5 CHECK(min_stock >= 0),
         image_data_url TEXT,
+        category TEXT NOT NULL DEFAULT 'Autres',
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
@@ -321,6 +323,16 @@ class TsenakelyDatabase {
     const saleColumns = queryAll<{name: string}>(db, `PRAGMA table_info(sales)`).map((column) => column.name);
     let schemaChanged = false;
     if (!productColumns.includes('image_data_url')) { db.run(`ALTER TABLE products ADD COLUMN image_data_url TEXT`); schemaChanged = true; }
+    if (!productColumns.includes('category')) {
+      db.run(`ALTER TABLE products ADD COLUMN category TEXT NOT NULL DEFAULT 'Autres'`);
+      db.run(`UPDATE products SET category = CASE
+        WHEN lower(name) LIKE '%glace%' THEN 'Glaces'
+        WHEN lower(name) LIKE '%pain%' OR lower(name) LIKE '%pâtisserie%' OR lower(name) LIKE '%patisserie%' THEN 'Pâtisserie'
+        WHEN lower(name) LIKE '%popcorn%' THEN 'Snacks'
+        ELSE 'Autres'
+      END`);
+      schemaChanged = true;
+    }
     for (const column of ['customer_name', 'customer_phone', 'customer_email', 'customer_address']) {
       if (!saleColumns.includes(column)) { db.run(`ALTER TABLE sales ADD COLUMN ${column} TEXT`); schemaChanged = true; }
     }
@@ -364,9 +376,9 @@ class TsenakelyDatabase {
         // 3. Catalogue initial (première installation uniquement)
         for (const item of INITIAL_PRODUCTS) {
           db.run(
-            `INSERT INTO products (name, price, stock_qty, min_stock, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?)`,
-            [item.name, item.price, item.stock_qty, item.min_stock, now, now]
+            `INSERT INTO products (name, price, stock_qty, min_stock, category, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [item.name, item.price, item.stock_qty, item.min_stock, item.category, now, now]
           );
           const inserted = queryOne<{id: number}>(
             db,
@@ -688,12 +700,14 @@ class TsenakelyDatabase {
       stock_qty: number;
       min_stock: number;
       image_data_url?: string | null;
+      category?: string;
     },
     actorName: string
   ): Promise<Product> {
     await this.init();
     const db = this.getDb();
     const name = input.name.trim();
+    const category = (input.category || 'Autres').trim() || 'Autres';
     if (!name) throw new Error('Le nom du produit est obligatoire.');
     if (input.price < 0 || Number.isNaN(input.price)) {
       throw new Error('Le prix de vente doit être positif ou nul.');
@@ -721,9 +735,9 @@ class TsenakelyDatabase {
     transactionActive = true;
     try {
       db.run(
-        `INSERT INTO products (name, price, stock_qty, min_stock, image_data_url, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [name, Math.round(input.price), input.stock_qty, input.min_stock, input.image_data_url ?? null, now, now]
+        `INSERT INTO products (name, price, stock_qty, min_stock, image_data_url, category, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [name, Math.round(input.price), input.stock_qty, input.min_stock, input.image_data_url ?? null, category, now, now]
       );
       const row = queryOne<{id: number}>(db, `SELECT last_insert_rowid() as id`);
       const productId = row!.id;
@@ -743,6 +757,7 @@ class TsenakelyDatabase {
         price: Math.round(input.price),
         stock_qty: input.stock_qty,
         min_stock: input.min_stock,
+        category,
         created_at: now,
         updated_at: now,
       };
@@ -761,11 +776,13 @@ class TsenakelyDatabase {
       price: number;
       min_stock: number;
       image_data_url?: string | null;
+      category?: string;
     }
   ): Promise<void> {
     await this.init();
     const db = this.getDb();
     const name = input.name.trim();
+    const category = (input.category || 'Autres').trim() || 'Autres';
     if (!name) throw new Error('Le nom du produit est obligatoire.');
     if (input.price < 0 || Number.isNaN(input.price)) {
       throw new Error('Le prix doit être positif.');
@@ -786,8 +803,8 @@ class TsenakelyDatabase {
     const now = new Date().toISOString();
     const previousSnapshot = db.export();
     db.run(
-      `UPDATE products SET name = ?, price = ?, min_stock = ?, image_data_url = ?, updated_at = ? WHERE id = ?`,
-      [name, Math.round(input.price), input.min_stock, input.image_data_url ?? null, now, id]
+      `UPDATE products SET name = ?, price = ?, min_stock = ?, image_data_url = ?, category = ?, updated_at = ? WHERE id = ?`,
+      [name, Math.round(input.price), input.min_stock, input.image_data_url ?? null, category, now, id]
     );
     await this.persistOrRestore(previousSnapshot);
   }

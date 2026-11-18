@@ -535,12 +535,11 @@ export function printThermalHtmlWindow(
   frame.title = `Ticket ${sale.sale_number}`;
   frame.setAttribute('aria-hidden', 'true');
   frame.style.position = 'fixed';
-  frame.style.width = '1px';
-  frame.style.height = '1px';
-  frame.style.right = '0';
-  frame.style.bottom = '0';
+  frame.style.width = `${widthMm}mm`;
+  frame.style.height = '100vh';
+  frame.style.left = '-10000px';
+  frame.style.top = '0';
   frame.style.border = '0';
-  frame.style.opacity = '0';
   frame.style.pointerEvents = 'none';
   document.body.appendChild(frame);
 

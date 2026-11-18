@@ -510,12 +510,6 @@ export function printThermalHtmlWindow(
   const widthMm = settings.printer_paper_width === '80' ? 80 : 58;
   const currency = settings.currency || 'Ar';
 
-  const win = window.open('', '_blank', 'width=380,height=640');
-  if (!win) {
-    window.print();
-    return;
-  }
-
   const esc = (s: string) =>
     s
       .replace(/&/g, '&amp;')
@@ -535,13 +529,37 @@ export function printThermalHtmlWindow(
     )
     .join('');
 
-  win.document.write(`<!doctype html>
+  // Print in a hidden iframe instead of window.open(). Android WebView can
+  // otherwise open an empty external tab and leave the app behind it.
+  const frame = document.createElement('iframe');
+  frame.title = `Ticket ${sale.sale_number}`;
+  frame.setAttribute('aria-hidden', 'true');
+  frame.style.position = 'fixed';
+  frame.style.width = `${widthMm}mm`;
+  frame.style.height = '100vh';
+  frame.style.left = '-10000px';
+  frame.style.top = '0';
+  frame.style.border = '0';
+  frame.style.pointerEvents = 'none';
+  document.body.appendChild(frame);
+
+  const printDoc = frame.contentDocument;
+  const printWindow = frame.contentWindow;
+  if (!printDoc || !printWindow || typeof printWindow.print !== 'function') {
+    frame.remove();
+    window.print();
+    return;
+  }
+
+  printDoc.open();
+  printDoc.write(`<!doctype html>
 <html lang="fr">
 <head>
 <meta charset="UTF-8" />
 <title>Ticket ${esc(sale.sale_number)}</title>
 <style>
   @page { size: ${widthMm}mm auto; margin: 2mm; }
+  html, body { margin: 0; padding: 0; }
   body {
     width: ${widthMm - 4}mm;
     margin: 0 auto;
@@ -558,7 +576,6 @@ export function printThermalHtmlWindow(
   .item { margin-bottom: 4px; }
   .item-name { font-weight: bold; }
   .total { font-size: ${widthMm === 80 ? '14px' : '13px'}; font-weight: bold; }
-  .thanks { margin-top: 8px; font-weight: bold; text-align: center; }
 </style>
 </head>
 <body>
@@ -577,15 +594,25 @@ export function printThermalHtmlWindow(
   <div class="row"><span>Payé</span><span>${esc(formatAriary(sale.amount_paid, currency))}</span></div>
   <div class="row"><span>Monnaie</span><span>${esc(formatAriary(sale.change_given, currency))}</span></div>
   <div class="sep"></div>
-  <div class="thanks">Merci pour votre achat !</div>
-  ${
-    settings.receipt_footer &&
-    settings.receipt_footer.trim().toLowerCase() !== 'merci pour votre achat !'
-      ? `<div class="center" style="margin-top:4px;">${esc(settings.receipt_footer)}</div>`
-      : ''
-  }
-  <script>window.onload = function(){ window.print(); };</script>
+  <div class="center" style="font-weight:bold;margin-top:8px;">Merci pour votre achat !</div>
+  ${settings.receipt_footer && settings.receipt_footer.trim().toLowerCase() !== 'merci pour votre achat !' ? `<div class="center" style="margin-top:4px;">${esc(settings.receipt_footer)}</div>` : ''}
 </body>
 </html>`);
-  win.document.close();
+  printDoc.close();
+
+  const cleanup = () => {
+    if (frame.isConnected) frame.remove();
+  };
+  printWindow.addEventListener('afterprint', cleanup, {once: true});
+
+  // Let Android finish laying out the receipt before opening the system print UI.
+  window.setTimeout(() => {
+    try {
+      printWindow.focus();
+      printWindow.print();
+    } catch {
+      cleanup();
+      window.print();
+    }
+  }, 300);
 }

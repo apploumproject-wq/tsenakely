@@ -38,6 +38,7 @@ export const PosPage: React.FC<PosPageProps> = ({
 }) => {
   const [products, setProducts] = useState<Product[]>([]);
   const [search, setSearch] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('Toutes');
   const [productPage, setProductPage] = useState(0);
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
@@ -82,12 +83,25 @@ export const PosPage: React.FC<PosPageProps> = ({
     loadProducts();
   }, [loadProducts, refreshKey]);
 
+  const productCategories = useMemo(
+    () =>
+      Array.from(
+        new Set(products.map((p) => (p.category || 'Autres').trim()).filter(Boolean))
+      ).sort((a, b) => a.localeCompare(b, 'fr')),
+    [products]
+  );
+
   const filteredProducts = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return products;
-    return products.filter((p) => p.name.toLowerCase().includes(q));
-  }, [products, search]);
-  useEffect(() => { setProductPage(0); }, [search]);
+    return products.filter((product) => {
+      const matchesSearch = !q || product.name.toLowerCase().includes(q);
+      const matchesCategory =
+        categoryFilter === 'Toutes' ||
+        (product.category || 'Autres') === categoryFilter;
+      return matchesSearch && matchesCategory;
+    });
+  }, [products, search, categoryFilter]);
+  useEffect(() => { setProductPage(0); }, [search, categoryFilter]);
 
   const pageSize = 4;
   const pageCount = Math.max(1, Math.ceil(filteredProducts.length / pageSize));
@@ -483,13 +497,31 @@ export const PosPage: React.FC<PosPageProps> = ({
         </div>
       </div>
 
+      {/* Filtres rapides par catégorie */}
+      <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1" aria-label="Filtrer par catégorie">
+        {['Toutes', ...productCategories].map((category) => (
+          <button
+            key={category}
+            type="button"
+            onClick={() => setCategoryFilter(category)}
+            className={`shrink-0 min-h-[38px] px-3.5 py-2 rounded-full border text-xs font-semibold transition-colors cursor-pointer ${
+              categoryFilter === category
+                ? 'bg-[#0F294A] border-[#0F294A] text-white'
+                : 'bg-white border-slate-300 text-slate-700 hover:border-[#0F294A]'
+            }`}
+          >
+            {category}
+          </button>
+        ))}
+      </div>
+
       {/* Grille Catalogue + Panier Desktop */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         <div className="lg:col-span-7 xl:col-span-8">
           {filteredProducts.length === 0 ? (
             <div className="rounded-2xl bg-white border border-slate-200 p-10 text-center">
               <p className="text-sm font-medium text-slate-600">
-                Aucun produit trouvé pour « {search} ».
+                Aucun produit trouvé{categoryFilter !== 'Toutes' ? ` dans « ${categoryFilter} »` : ''}{search ? ` pour « ${search} »` : ''}.
               </p>
             </div>
           ) : (
@@ -516,9 +548,14 @@ export const PosPage: React.FC<PosPageProps> = ({
                   >
                     {product.image_data_url && <img src={product.image_data_url} alt={product.name} loading="lazy" className="w-full aspect-square max-h-36 object-cover rounded-xl mb-3" />}
                     <div className="flex items-start justify-between gap-2">
-                      <h3 className="text-sm font-bold text-slate-900 leading-snug">
-                        {product.name}
-                      </h3>
+                      <div className="min-w-0">
+                        <span className="inline-block mb-1 px-2 py-0.5 rounded-full bg-slate-100 text-[10px] font-semibold text-slate-600">
+                          {product.category || 'Autres'}
+                        </span>
+                        <h3 className="text-sm font-bold text-slate-900 leading-snug">
+                          {product.name}
+                        </h3>
+                      </div>
                       {inCartQty > 0 && (
                         <span className="shrink-0 font-mono-num text-xs font-bold text-[#0F294A]">
                           ×{inCartQty}

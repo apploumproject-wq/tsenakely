@@ -16,6 +16,7 @@ export interface Product {
   stock_qty: number;
   min_stock: number;
   image_data_url?: string | null;
+  category: string;
   created_at: string;
   updated_at: string;
 }

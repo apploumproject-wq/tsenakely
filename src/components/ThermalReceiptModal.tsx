@@ -275,6 +275,13 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
         <div className="px-5 py-3.5 border-t border-slate-200 bg-white flex flex-wrap items-center justify-end gap-2.5">
           <button
             type="button"
+            onClick={onClose}
+            className="min-h-[42px] px-4 py-2 rounded-xl border border-slate-300 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
+          >
+            Fermer
+          </button>
+          <button
+            type="button"
             onClick={handleDownloadEscPosBin}
             className="min-h-[42px] px-3.5 py-2 rounded-xl border border-slate-300 text-xs font-medium text-slate-700 hover:bg-slate-50 inline-flex items-center gap-1.5 cursor-pointer"
           >

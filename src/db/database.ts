@@ -679,6 +679,54 @@ class TsenakelyDatabase {
 
   // ===================== PRODUITS & STOCKS =====================
 
+  async getProductCategories(): Promise<string[]> {
+    await this.init();
+    const db = this.getDb();
+    const saved = queryOne<{value: string}>(
+      db,
+      `SELECT value FROM app_settings WHERE key = ?`,
+      ['product_categories']
+    );
+    let configured: string[] = [];
+    try {
+      const parsed: unknown = saved ? JSON.parse(saved.value) : [];
+      if (Array.isArray(parsed)) {
+        configured = parsed.filter((value): value is string => typeof value === 'string');
+      }
+    } catch {
+      configured = [];
+    }
+    const existing = queryAll<{category: string}>(
+      db,
+      `SELECT DISTINCT category FROM products ORDER BY category COLLATE NOCASE`
+    ).map((row) => row.category);
+    return Array.from(new Set(['Autres', 'Boissons', 'Glaces', 'Pâtisserie', 'Snacks', ...configured, ...existing]
+      .map((value) => value.trim())
+      .filter(Boolean)))
+      .sort((a, b) => a.localeCompare(b, 'fr'));
+  }
+
+  async addProductCategory(categoryName: string): Promise<string[]> {
+    await this.init();
+    const category = categoryName.trim().replace(/\\s+/g, ' ');
+    if (!category) throw new Error('Le nom de la catégorie est obligatoire.');
+    if (category.length > 40) throw new Error('La catégorie ne doit pas dépasser 40 caractères.');
+    const db = this.getDb();
+    const categories = await this.getProductCategories();
+    if (categories.some((item) => item.toLocaleLowerCase('fr') === category.toLocaleLowerCase('fr'))) {
+      throw new Error(`La catégorie « ${category} » existe déjà.`);
+    }
+    const next = [...categories, category].sort((a, b) => a.localeCompare(b, 'fr'));
+    const previousSnapshot = db.export();
+    db.run(
+      `INSERT INTO app_settings (key, value) VALUES (?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+      ['product_categories', JSON.stringify(next)]
+    );
+    await this.persistOrRestore(previousSnapshot);
+    return next;
+  }
+
   async getProducts(search = ''): Promise<Product[]> {
     await this.init();
     const db = this.getDb();

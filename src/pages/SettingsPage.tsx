@@ -18,6 +18,7 @@ import {
   Shield,
   Smartphone,
   Store,
+  Tag,
   Trash2,
   Upload,
   Usb,
@@ -90,6 +91,8 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [prodName, setProdName] = useState('');
   const [prodCategory, setProdCategory] = useState('Autres');
+  const [productCategories, setProductCategories] = useState<string[]>(['Autres']);
+  const [newCategoryName, setNewCategoryName] = useState('');
   const [prodPrice, setProdPrice] = useState('');
   const [prodStock, setProdStock] = useState('10');
   const [prodMinStock, setProdMinStock] = useState('5');
@@ -151,6 +154,11 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
     setProducts(list);
   }, [productSearch]);
 
+  const loadProductCategories = useCallback(async () => {
+    const list = await tsenakelyDb.getProductCategories();
+    setProductCategories(list);
+  }, []);
+
   const loadUsers = useCallback(async () => {
     if (!isAdmin) return;
     const list = await tsenakelyDb.getUsers();
@@ -159,7 +167,8 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
 
   useEffect(() => {
     loadProducts();
-  }, [loadProducts, refreshKey]);
+    loadProductCategories();
+  }, [loadProducts, loadProductCategories, refreshKey]);
 
   useEffect(() => {
     loadUsers();
@@ -168,6 +177,19 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
   useEffect(() => {
     setFormSettings(settings);
   }, [settings]);
+
+  const handleAddProductCategory = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setNotice(null);
+    try {
+      const next = await tsenakelyDb.addProductCategory(newCategoryName);
+      setProductCategories(next);
+      setNewCategoryName('');
+      showMessage('success', 'Catégorie créée. Elle est maintenant disponible pour les produits et dans Vente.');
+    } catch (err) {
+      showMessage('error', err instanceof Error ? err.message : 'Création de la catégorie impossible.');
+    }
+  };
 
   // ----- Handlers Produits -----
   const openAddProduct = () => {
@@ -800,6 +822,45 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
               ajouter ou supprimer des produits.
             </p>
           )}
+
+          <div className="rounded-2xl bg-white border border-slate-200 p-4 sm:p-5 space-y-3">
+            <div>
+              <h2 className="text-sm font-bold text-slate-900 inline-flex items-center gap-2">
+                <Tag className="w-4 h-4 text-[#0F294A]" />
+                Catégories de produits
+              </h2>
+              <p className="mt-1 text-xs text-slate-500">
+                Crée tes catégories ici. Elles seront proposées lors de l'ajout d'un produit et affichées comme filtres dans Vente.
+              </p>
+            </div>
+            {isAdmin && (
+              <form onSubmit={handleAddProductCategory} className="flex flex-col sm:flex-row gap-2">
+                <input
+                  type="text"
+                  required
+                  maxLength={40}
+                  value={newCategoryName}
+                  onChange={(e) => setNewCategoryName(e.target.value)}
+                  placeholder="Ex. Boissons, Glaces, Pâtisserie..."
+                  className="flex-1 min-w-0 min-h-[44px] px-3.5 py-2 rounded-xl border border-slate-300 text-sm focus:outline-none focus:border-[#0F294A]"
+                />
+                <button
+                  type="submit"
+                  className="min-h-[44px] px-4 py-2 rounded-xl bg-[#0F294A] text-white text-sm font-semibold inline-flex items-center justify-center gap-2 hover:bg-[#163A66]"
+                >
+                  <Plus className="w-4 h-4" />
+                  Créer la catégorie
+                </button>
+              </form>
+            )}
+            <div className="flex flex-wrap gap-2">
+              {productCategories.map((category) => (
+                <span key={category} className="px-3 py-1.5 rounded-full bg-slate-100 text-xs font-semibold text-slate-700">
+                  {category}
+                </span>
+              ))}
+            </div>
+          </div>
 
           <div className="rounded-2xl bg-white border border-slate-200 overflow-hidden">
             <div className="overflow-x-auto">
@@ -1690,11 +1751,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
                   className="w-full min-h-[44px] px-3.5 py-2 rounded-xl border border-slate-300 text-sm focus:outline-none focus:border-[#0F294A]"
                 />
                 <datalist id="tsenakely-product-categories">
-                  <option value="Boissons" />
-                  <option value="Glaces" />
-                  <option value="Pâtisserie" />
-                  <option value="Snacks" />
-                  <option value="Autres" />
+                  {productCategories.map((category) => <option key={category} value={category} />)}
                 </datalist>
               </div>
 

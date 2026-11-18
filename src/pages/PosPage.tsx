@@ -37,6 +37,7 @@ export const PosPage: React.FC<PosPageProps> = ({
   onSaleCompleted,
 }) => {
   const [products, setProducts] = useState<Product[]>([]);
+  const [productCategories, setProductCategories] = useState<string[]>([]);
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('Toutes');
   const [productPage, setProductPage] = useState(0);
@@ -62,8 +63,12 @@ export const PosPage: React.FC<PosPageProps> = ({
   const currency = settings.currency || 'Ar';
 
   const loadProducts = useCallback(async () => {
-    const list = await tsenakelyDb.getProducts();
+    const [list, categories] = await Promise.all([
+      tsenakelyDb.getProducts(),
+      tsenakelyDb.getProductCategories(),
+    ]);
     setProducts(list);
+    setProductCategories(categories);
     // Synchroniser les produits du panier avec les stocks/prix actuels
     setCart((prev) =>
       prev
@@ -82,14 +87,6 @@ export const PosPage: React.FC<PosPageProps> = ({
   useEffect(() => {
     loadProducts();
   }, [loadProducts, refreshKey]);
-
-  const productCategories = useMemo(
-    () =>
-      Array.from(
-        new Set(products.map((p) => (p.category || 'Autres').trim()).filter(Boolean))
-      ).sort((a, b) => a.localeCompare(b, 'fr')),
-    [products]
-  );
 
   const filteredProducts = useMemo(() => {
     const q = search.trim().toLowerCase();

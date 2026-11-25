@@ -11,6 +11,7 @@ export interface User {
 
 export interface Product {
   id: number;
+  product_type: 'FINISHED' | 'HOMEMADE';
   name: string;
   price: number;
   stock_qty: number;
@@ -155,3 +156,22 @@ export type StatsPeriod =
   | 'custom';
 
 export type NavTab = 'accueil' | 'vente' | 'historique' | 'statistiques' | 'parametres';
+
+
+export interface ProductionIngredientInput {
+  name: string;
+  purchase_quantity: number;
+  purchase_unit: string;
+  purchase_price: number;
+  used_quantity: number;
+  used_unit: string;
+}
+export interface ProductionIngredient extends ProductionIngredientInput {
+  id: number; batch_id: number; used_cost: number;
+}
+export interface ProductionBatch {
+  id: number; product_id: number; product_name: string; produced_at: string;
+  closed_at: string | null; total_cost: number; sold_quantity: number | null;
+  revenue: number | null; profit: number | null; status: 'ACTIVE' | 'CLOSED';
+  ingredients: ProductionIngredient[];
+}

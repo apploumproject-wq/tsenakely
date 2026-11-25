@@ -1729,6 +1729,17 @@ class TsenakelyDatabase {
           [k, v]
         );
       }
+
+      if (Array.isArray(parsed.production_batches)) {
+        for (const b of parsed.production_batches as Array<{id:number;product_id:number;product_name:string;produced_at:string;closed_at:string|null;total_cost:number;sold_quantity:number|null;revenue:number|null;profit:number|null;status:string}>) {
+          db.run(`INSERT INTO production_batches(id,product_id,product_name,produced_at,closed_at,total_cost,sold_quantity,revenue,profit,status) VALUES(?,?,?,?,?,?,?,?,?,?)`,[b.id,b.product_id,b.product_name,b.produced_at,b.closed_at??null,b.total_cost,b.sold_quantity??null,b.revenue??null,b.profit??null,b.status]);
+        }
+      }
+      if (Array.isArray(parsed.production_ingredients)) {
+        for (const i of parsed.production_ingredients as Array<{id:number;batch_id:number;name:string;purchase_quantity:number;purchase_unit:string;purchase_price:number;used_quantity:number;used_unit:string;used_cost:number}>) {
+          db.run(`INSERT INTO production_ingredients(id,batch_id,name,purchase_quantity,purchase_unit,purchase_price,used_quantity,used_unit,used_cost) VALUES(?,?,?,?,?,?,?,?,?)`,[i.id,i.batch_id,i.name,i.purchase_quantity,i.purchase_unit,i.purchase_price,i.used_quantity,i.used_unit,i.used_cost]);
+        }
+      }
       db.run('COMMIT;');
       transactionActive = false;
       await this.persistOrRestore(previousSnapshot);
@@ -1893,6 +1904,8 @@ class TsenakelyDatabase {
       for (const p of parsed.products as Array<{
         id: number;
         name: string;
+        product_type?: 'FINISHED' | 'HOMEMADE';
+        category?: string;
         price: number;
         stock_qty: number;
         min_stock: number;
@@ -1901,15 +1914,17 @@ class TsenakelyDatabase {
         updated_at: string;
       }>) {
         db.run(
-          `INSERT INTO products (id, name, price, stock_qty, min_stock, image_data_url, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO products (id, name, product_type, price, stock_qty, min_stock, image_data_url, category, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             p.id,
             p.name,
+            p.product_type ?? 'FINISHED',
             p.price,
             p.stock_qty,
             p.min_stock,
             p.image_data_url ?? null,
+            p.category ?? 'Autres',
             p.created_at,
             p.updated_at,
           ]

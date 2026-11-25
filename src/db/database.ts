@@ -266,6 +266,7 @@ class TsenakelyDatabase {
         min_stock INTEGER NOT NULL DEFAULT 5 CHECK(min_stock >= 0),
         image_data_url TEXT,
         category TEXT NOT NULL DEFAULT 'Autres',
+        has_size_variants INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
@@ -308,6 +309,7 @@ class TsenakelyDatabase {
         product_name TEXT NOT NULL,
         unit_price REAL NOT NULL,
         quantity INTEGER NOT NULL CHECK(quantity > 0),
+        unit_multiplier INTEGER NOT NULL DEFAULT 1,
         subtotal REAL NOT NULL,
         FOREIGN KEY (sale_id) REFERENCES sales(id) ON DELETE CASCADE
       );
@@ -333,8 +335,11 @@ class TsenakelyDatabase {
 
     const productColumns = queryAll<{name: string}>(db, `PRAGMA table_info(products)`).map((column) => column.name);
     const saleColumns = queryAll<{name: string}>(db, `PRAGMA table_info(sales)`).map((column) => column.name);
+    const saleDetailColumns = queryAll<{name: string}>(db, `PRAGMA table_info(sale_details)`).map((column) => column.name);
     let schemaChanged = false;
     if (!productColumns.includes('product_type')) { db.run(`ALTER TABLE products ADD COLUMN product_type TEXT NOT NULL DEFAULT 'FINISHED'`); schemaChanged = true; }
+    if (!productColumns.includes('has_size_variants')) { db.run(`ALTER TABLE products ADD COLUMN has_size_variants INTEGER NOT NULL DEFAULT 0`); schemaChanged = true; }
+    if (!saleDetailColumns.includes('unit_multiplier')) { db.run(`ALTER TABLE sale_details ADD COLUMN unit_multiplier INTEGER NOT NULL DEFAULT 1`); schemaChanged = true; }
     if (!productColumns.includes('image_data_url')) { db.run(`ALTER TABLE products ADD COLUMN image_data_url TEXT`); schemaChanged = true; }
     if (!productColumns.includes('category')) {
       db.run(`ALTER TABLE products ADD COLUMN category TEXT NOT NULL DEFAULT 'Autres'`);
@@ -691,18 +696,28 @@ class TsenakelyDatabase {
   }
 
   // ===================== FABRICATIONS MAISON =====================
+  async setProductSizeVariants(productId:number, enabled:boolean):Promise<void>{
+    await this.init(); const db=this.getDb();
+    const product=queryOne<Product>(db,`SELECT * FROM products WHERE id=?`,[productId]);
+    if(!product) throw new Error('Produit introuvable.');
+    if(enabled && product.product_type!=='HOMEMADE') throw new Error('Les formats Simple/Double sont réservés aux fabrications maison.');
+    const snapshot=db.export();
+    db.run(`UPDATE products SET has_size_variants=?,updated_at=? WHERE id=?`,[enabled?1:0,new Date().toISOString(),productId]);
+    await this.persistOrRestore(snapshot);
+  }
+
   async setProductType(productId: number, productType: 'FINISHED' | 'HOMEMADE'): Promise<void> {
     await this.init(); const db = this.getDb();
     const active = queryOne<{id:number}>(db, `SELECT id FROM production_batches WHERE product_id=? AND status='ACTIVE'`, [productId]);
     if (active && productType === 'FINISHED') throw new Error('Clôturez la fabrication en cours avant de convertir ce produit.');
-    const snapshot=db.export(); db.run(`UPDATE products SET product_type=?, updated_at=? WHERE id=?`, [productType,new Date().toISOString(),productId]); await this.persistOrRestore(snapshot);
+    const snapshot=db.export(); db.run(`UPDATE products SET product_type=?, has_size_variants=CASE WHEN ?='HOMEMADE' THEN has_size_variants ELSE 0 END, updated_at=? WHERE id=?`, [productType,productType,new Date().toISOString(),productId]); await this.persistOrRestore(snapshot);
   }
   async getProductionBatches(): Promise<import('./types').ProductionBatch[]> {
     await this.init(); const db=this.getDb();
     const batches=queryAll<Omit<import('./types').ProductionBatch,'ingredients'>>(db,`SELECT * FROM production_batches ORDER BY produced_at DESC,id DESC`);
     return batches.map(batch=>{
       const live=batch.status==='ACTIVE'
-        ? queryOne<{quantity:number;revenue:number}>(db,`SELECT COALESCE(SUM(sd.quantity),0) as quantity,COALESCE(SUM(sd.subtotal),0) as revenue FROM sale_details sd INNER JOIN sales s ON s.id=sd.sale_id WHERE sd.product_id=? AND s.status='COMPLETED' AND s.sale_date>=? AND s.sale_date<=?`,[batch.product_id,batch.produced_at,new Date().toISOString()])
+        ? queryOne<{quantity:number;revenue:number}>(db,`SELECT COALESCE(SUM(sd.quantity * COALESCE(sd.unit_multiplier,1)),0) as quantity,COALESCE(SUM(sd.subtotal),0) as revenue FROM sale_details sd INNER JOIN sales s ON s.id=sd.sale_id WHERE sd.product_id=? AND s.status='COMPLETED' AND s.sale_date>=? AND s.sale_date<=?`,[batch.product_id,batch.produced_at,new Date().toISOString()])
         : null;
       return {...batch,sold_quantity:batch.status==='ACTIVE'?(live?.quantity??0):batch.sold_quantity,revenue:batch.status==='ACTIVE'?(live?.revenue??0):batch.revenue,ingredients:queryAll<import('./types').ProductionIngredient>(db,`SELECT * FROM production_ingredients WHERE batch_id=? ORDER BY id ASC`,[batch.id])};
     });
@@ -735,7 +750,7 @@ class TsenakelyDatabase {
     const batch=queryOne<import('./types').ProductionBatch>(db,`SELECT * FROM production_batches WHERE id=? AND status='ACTIVE'`,[batchId]);
     if(!batch) throw new Error('Cette fabrication est introuvable ou déjà clôturée.');
     const now=new Date().toISOString();
-    const sales=queryOne<{quantity:number;revenue:number}>(db,`SELECT COALESCE(SUM(sd.quantity),0) as quantity,COALESCE(SUM(sd.subtotal),0) as revenue FROM sale_details sd INNER JOIN sales s ON s.id=sd.sale_id WHERE sd.product_id=? AND s.status='COMPLETED' AND s.sale_date>=? AND s.sale_date<=?`,[batch.product_id,batch.produced_at,now]);
+    const sales=queryOne<{quantity:number;revenue:number}>(db,`SELECT COALESCE(SUM(sd.quantity * COALESCE(sd.unit_multiplier,1)),0) as quantity,COALESCE(SUM(sd.subtotal),0) as revenue FROM sale_details sd INNER JOIN sales s ON s.id=sd.sale_id WHERE sd.product_id=? AND s.status='COMPLETED' AND s.sale_date>=? AND s.sale_date<=?`,[batch.product_id,batch.produced_at,now]);
     const quantity=sales?.quantity??0, revenue=sales?.revenue??0, snapshot=db.export();
     db.run(`UPDATE production_batches SET closed_at=?,sold_quantity=?,revenue=?,profit=?,status='CLOSED' WHERE id=?`,[now,quantity,revenue,revenue-batch.total_cost,batchId]);
     await this.persistOrRestore(snapshot);
@@ -812,6 +827,7 @@ class TsenakelyDatabase {
       min_stock: number;
       image_data_url?: string | null;
       category?: string;
+      has_size_variants?: boolean;
     },
     actorName: string
   ): Promise<Product> {
@@ -846,9 +862,9 @@ class TsenakelyDatabase {
     transactionActive = true;
     try {
       db.run(
-        `INSERT INTO products (name, price, stock_qty, min_stock, image_data_url, category, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [name, Math.round(input.price), input.stock_qty, input.min_stock, input.image_data_url ?? null, category, now, now]
+        `INSERT INTO products (name, price, stock_qty, min_stock, image_data_url, category, has_size_variants, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [name, Math.round(input.price), input.stock_qty, input.min_stock, input.image_data_url ?? null, category, input.has_size_variants ? 1 : 0, now, now]
       );
       const row = queryOne<{id: number}>(db, `SELECT last_insert_rowid() as id`);
       const productId = row!.id;
@@ -865,6 +881,7 @@ class TsenakelyDatabase {
       return {
         id: productId,
         product_type: 'FINISHED',
+        has_size_variants: input.has_size_variants ? 1 : 0,
         name,
         price: Math.round(input.price),
         stock_qty: input.stock_qty,
@@ -1033,11 +1050,7 @@ class TsenakelyDatabase {
     transactionActive = true;
     try {
       let totalAmount = 0;
-      const verifiedItems: Array<{
-        product: Product;
-        quantity: number;
-        subtotal: number;
-      }> = [];
+      const verifiedItems: Array<{product:Product;quantity:number;subtotal:number;unit_price:number;variant_name:string|null;unit_multiplier:number}> = [];
 
       for (const item of items) {
         if (!Number.isInteger(item.quantity) || item.quantity <= 0) {
@@ -1059,13 +1072,15 @@ class TsenakelyDatabase {
             `Stock insuffisant pour « ${liveProduct.name} » (disponible : ${liveProduct.stock_qty}, demandé : ${item.quantity}).`
           );
         }
-        const subtotal = Math.round(liveProduct.price * item.quantity);
+        const variantName = item.variant_name?.trim() || null;
+        const unitMultiplier = item.unit_multiplier ?? 1;
+        if (!Number.isInteger(unitMultiplier) || unitMultiplier < 1 || unitMultiplier > 2) throw new Error(`Format invalide pour « ${liveProduct.name} ».`);
+        const unitPrice = liveProduct.price * unitMultiplier;
+        if (liveProduct.has_size_variants && (!variantName || (variantName === 'Simple' && unitMultiplier !== 1) || (variantName === 'Double' && unitMultiplier !== 2) || !['Simple','Double'].includes(variantName))) throw new Error(`Choisissez le format Simple ou Double pour « ${liveProduct.name} ».`);
+        if (!liveProduct.has_size_variants && (variantName || unitMultiplier !== 1)) throw new Error(`Ce produit ne propose pas de format multiple : « ${liveProduct.name} ».`);
+        const subtotal = Math.round(unitPrice * item.quantity);
         totalAmount += subtotal;
-        verifiedItems.push({
-          product: liveProduct,
-          quantity: item.quantity,
-          subtotal,
-        });
+        verifiedItems.push({product:liveProduct,quantity:item.quantity,subtotal,unit_price:unitPrice,variant_name:variantName,unit_multiplier:unitMultiplier});
       }
 
       const paidRounded = Math.round(amountPaid);
@@ -1108,16 +1123,9 @@ class TsenakelyDatabase {
 
       for (const entry of verifiedItems) {
         db.run(
-          `INSERT INTO sale_details (sale_id, product_id, product_name, unit_price, quantity, subtotal)
-           VALUES (?, ?, ?, ?, ?, ?)`,
-          [
-            saleId,
-            entry.product.id,
-            entry.product.name,
-            entry.product.price,
-            entry.quantity,
-            entry.subtotal,
-          ]
+          `INSERT INTO sale_details (sale_id, product_id, product_name, unit_price, quantity, unit_multiplier, subtotal)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [saleId,entry.product.id,entry.variant_name ? `${entry.product.name} (${entry.variant_name})` : entry.product.name,entry.unit_price,entry.quantity,entry.unit_multiplier,entry.subtotal]
         );
         const detIdRow = queryOne<{id: number}>(
           db,
@@ -1127,9 +1135,10 @@ class TsenakelyDatabase {
           id: detIdRow!.id,
           sale_id: saleId,
           product_id: entry.product.id,
-          product_name: entry.product.name,
-          unit_price: entry.product.price,
+          product_name: entry.variant_name ? `${entry.product.name} (${entry.variant_name})` : entry.product.name,
+          unit_price: entry.unit_price,
           quantity: entry.quantity,
+          unit_multiplier: entry.unit_multiplier,
           subtotal: entry.subtotal,
         });
 
@@ -1896,6 +1905,7 @@ class TsenakelyDatabase {
         id: number;
         name: string;
         product_type?: 'FINISHED' | 'HOMEMADE';
+        has_size_variants?: number | boolean;
         category?: string;
         price: number;
         stock_qty: number;
@@ -1905,20 +1915,9 @@ class TsenakelyDatabase {
         updated_at: string;
       }>) {
         db.run(
-          `INSERT INTO products (id, name, product_type, price, stock_qty, min_stock, image_data_url, category, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [
-            p.id,
-            p.name,
-            p.product_type ?? 'FINISHED',
-            p.price,
-            p.stock_qty,
-            p.min_stock,
-            p.image_data_url ?? null,
-            p.category ?? 'Autres',
-            p.created_at,
-            p.updated_at,
-          ]
+          `INSERT INTO products (id, name, product_type, price, stock_qty, min_stock, image_data_url, category, has_size_variants, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [p.id,p.name,p.product_type ?? 'FINISHED',p.price,p.stock_qty,p.min_stock,p.image_data_url ?? null,p.category ?? 'Autres',p.has_size_variants ? 1 : 0,p.created_at,p.updated_at]
         );
       }
 
@@ -1972,19 +1971,12 @@ class TsenakelyDatabase {
         unit_price: number;
         quantity: number;
         subtotal: number;
+        unit_multiplier?: number;
       }>) {
         db.run(
-          `INSERT INTO sale_details (id, sale_id, product_id, product_name, unit_price, quantity, subtotal)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
-          [
-            d.id,
-            d.sale_id,
-            d.product_id ?? null,
-            d.product_name,
-            d.unit_price,
-            d.quantity,
-            d.subtotal,
-          ]
+          `INSERT INTO sale_details (id, sale_id, product_id, product_name, unit_price, quantity, unit_multiplier, subtotal)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [d.id,d.sale_id,d.product_id ?? null,d.product_name,d.unit_price,d.quantity,d.unit_multiplier ?? 1,d.subtotal]
         );
       }
 

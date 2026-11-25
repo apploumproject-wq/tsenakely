@@ -12,6 +12,7 @@ export interface User {
 export interface Product {
   id: number;
   product_type: 'FINISHED' | 'HOMEMADE';
+  has_size_variants?: number | boolean;
   has_active_production?: number | boolean;
   name: string;
   price: number;
@@ -53,6 +54,7 @@ export interface SaleDetail {
   unit_price: number;
   quantity: number;
   subtotal: number;
+  unit_multiplier?: number;
 }
 
 export interface SaleWithDetails extends Sale {
@@ -108,6 +110,9 @@ export type ExportPeriod =
 export interface CartItem {
   product: Product;
   quantity: number;
+  variant_name?: string;
+  unit_price?: number;
+  unit_multiplier?: number;
 }
 
 export interface DailySalesPoint {

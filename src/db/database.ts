@@ -1316,7 +1316,7 @@ class TsenakelyDatabase {
             `SELECT * FROM products WHERE id = ?`,
             [detail.product_id]
           );
-          if (prod) {
+          if (prod && prod.product_type !== 'HOMEMADE') {
             const restoredQty = prod.stock_qty + detail.quantity;
             db.run(
               `UPDATE products SET stock_qty = ?, updated_at = ? WHERE id = ?`,
@@ -1391,12 +1391,13 @@ class TsenakelyDatabase {
     );
 
     const totalProducts = products.length;
-    const totalStockUnits = products.reduce((sum, p) => sum + p.stock_qty, 0);
-    const outOfStockCount = products.filter((p) => p.stock_qty === 0).length;
-    const lowStockCount = products.filter(
+    const stockManagedProducts = products.filter((p) => p.product_type !== 'HOMEMADE');
+    const totalStockUnits = stockManagedProducts.reduce((sum, p) => sum + p.stock_qty, 0);
+    const outOfStockCount = stockManagedProducts.filter((p) => p.stock_qty === 0).length;
+    const lowStockCount = stockManagedProducts.filter(
       (p) => p.stock_qty > 0 && p.stock_qty <= p.min_stock
     ).length;
-    const alertProducts = products.filter((p) => p.stock_qty <= p.min_stock);
+    const alertProducts = stockManagedProducts.filter((p) => p.stock_qty <= p.min_stock);
 
     // 7 derniers jours
     const sevenDaysStart = new Date(

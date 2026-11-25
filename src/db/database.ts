@@ -1046,7 +1046,7 @@ class TsenakelyDatabase {
         if (!liveProduct) {
           throw new Error(`Produit introuvable : ${item.product.name}.`);
         }
-        if (liveProduct.stock_qty < item.quantity) {
+        if (liveProduct.product_type !== 'HOMEMADE' && liveProduct.stock_qty < item.quantity) {
           throw new Error(
             `Stock insuffisant pour « ${liveProduct.name} » (disponible : ${liveProduct.stock_qty}, demandé : ${item.quantity}).`
           );
@@ -1125,26 +1125,18 @@ class TsenakelyDatabase {
           subtotal: entry.subtotal,
         });
 
-        const newStock = entry.product.stock_qty - entry.quantity;
-        db.run(
-          `UPDATE products SET stock_qty = ?, updated_at = ? WHERE id = ?`,
-          [newStock, nowIso, entry.product.id]
-        );
-
-        db.run(
-          `INSERT INTO stock_movements (product_id, product_name, movement_type, qty_change, qty_before, qty_after, reason, user_name, created_at)
-           VALUES (?, ?, 'SALE', ?, ?, ?, ?, ?, ?)`,
-          [
-            entry.product.id,
-            entry.product.name,
-            -entry.quantity,
-            entry.product.stock_qty,
-            newStock,
-            `Vente ${saleNumber}`,
-            user.full_name,
-            nowIso,
-          ]
-        );
+        if (entry.product.product_type !== 'HOMEMADE') {
+          const newStock = entry.product.stock_qty - entry.quantity;
+          db.run(
+            `UPDATE products SET stock_qty = ?, updated_at = ? WHERE id = ?`,
+            [newStock, nowIso, entry.product.id]
+          );
+          db.run(
+            `INSERT INTO stock_movements (product_id, product_name, movement_type, qty_change, qty_before, qty_after, reason, user_name, created_at)
+             VALUES (?, ?, 'SALE', ?, ?, ?, ?, ?, ?)`,
+            [entry.product.id, entry.product.name, -entry.quantity, entry.product.stock_qty, newStock, `Vente ${saleNumber}`, user.full_name, nowIso]
+          );
+        }
       }
 
       db.run('COMMIT;');

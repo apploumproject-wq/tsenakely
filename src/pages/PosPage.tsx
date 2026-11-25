@@ -59,6 +59,7 @@ export const PosPage: React.FC<PosPageProps> = ({
   const [thermalPreviewSale, setThermalPreviewSale] =
     useState<SaleWithDetails | null>(null);
   const [mobileCartOpen, setMobileCartOpen] = useState(false);
+  const [selectedVariantProduct, setSelectedVariantProduct] = useState<Product | null>(null);
 
   const currency = settings.currency || 'Ar';
 
@@ -78,9 +79,10 @@ export const PosPage: React.FC<PosPageProps> = ({
           return {
             product: fresh,
             quantity: fresh.product_type === 'HOMEMADE' ? item.quantity : Math.min(item.quantity, fresh.stock_qty),
+            variant: item.variant,
           };
         })
-        .filter((x): x is CartItem => x !== null)
+        .filter((x): x is NonNullable<typeof x> => x !== null)
     );
   }, []);
 
@@ -107,7 +109,7 @@ export const PosPage: React.FC<PosPageProps> = ({
   const cartTotal = useMemo(
     () =>
       cart.reduce(
-        (sum, item) => sum + Math.round(item.product.price * item.quantity),
+        (sum, item) => sum + Math.round((item.variant?.price ?? item.product.price) * item.quantity),
         0
       ),
     [cart]
@@ -127,11 +129,11 @@ export const PosPage: React.FC<PosPageProps> = ({
 
   const changeAmount = numericAmountPaid - cartTotal;
 
-  const getCartQuantity = (productId: number) =>
-    cart.find((c) => c.product.id === productId)?.quantity ?? 0;
+  const getCartQuantity = (productId: number) => cart.filter((c) => c.product.id === productId).reduce((sum,c) => sum+c.quantity,0);
 
-  const addToCart = (product: Product) => {
+  const addToCart = (product: Product, variant?: {name:string;price:number;portions:number}) => {
     setError('');
+    if (product.product_type === 'HOMEMADE' && !variant) { setSelectedVariantProduct(product); return; }
     if (product.product_type === 'HOMEMADE' && !product.has_active_production) {
       setError(`Aucune fabrication en cours pour « ${product.name} ».`);
       return;
@@ -141,7 +143,7 @@ export const PosPage: React.FC<PosPageProps> = ({
       return;
     }
     setCart((prev) => {
-      const idx = prev.findIndex((i) => i.product.id === product.id);
+      const idx = prev.findIndex((i) => i.product.id === product.id && (i.variant?.name ?? '') === (variant?.name ?? ''));
       if (idx >= 0) {
         const currentQty = prev[idx].quantity;
         if (product.product_type !== 'HOMEMADE' && currentQty >= product.stock_qty) {
@@ -153,22 +155,22 @@ export const PosPage: React.FC<PosPageProps> = ({
           return prev;
         }
         const next = [...prev];
-        next[idx] = {product, quantity: currentQty + 1};
+        next[idx] = {product, quantity: currentQty + 1, variant};
         return next;
       }
-      return [...prev, {product, quantity: 1}];
+      return [...prev, {product, quantity: 1, variant}];
     });
   };
 
-  const updateCartQuantity = (productId: number, nextQty: number) => {
+  const updateCartQuantity = (productId: number, nextQty: number, variantName?: string) => {
     setError('');
     if (nextQty <= 0) {
-      setCart((prev) => prev.filter((i) => i.product.id !== productId));
+      setCart((prev) => prev.filter((i) => !(i.product.id === productId && (i.variant?.name ?? '') === (variantName ?? ''))));
       return;
     }
     setCart((prev) =>
       prev.map((item) => {
-        if (item.product.id !== productId) return item;
+        if (item.product.id !== productId || (item.variant?.name ?? '') !== (variantName ?? '')) return item;
         if (item.product.product_type !== 'HOMEMADE' && nextQty > item.product.stock_qty) {
           setError(
             `Stock disponible insuffisant pour « ${item.product.name} » (max ${item.product.stock_qty}).`
@@ -180,9 +182,9 @@ export const PosPage: React.FC<PosPageProps> = ({
     );
   };
 
-  const removeFromCart = (productId: number) => {
+  const removeFromCart = (productId: number, variantName?: string) => {
     setError('');
-    setCart((prev) => prev.filter((i) => i.product.id !== productId));
+    setCart((prev) => prev.filter((i) => !(i.product.id === productId && (i.variant?.name ?? '') === (variantName ?? ''))));
   };
 
   const clearCart = () => {
@@ -296,16 +298,17 @@ export const PosPage: React.FC<PosPageProps> = ({
           </div>
         ) : (
           cart.map((item) => {
-            const subtotal = Math.round(item.product.price * item.quantity);
+            const unitPrice = item.variant?.price ?? item.product.price;
+            const subtotal = Math.round(unitPrice * item.quantity);
             return (
-              <div key={item.product.id} className="py-3 space-y-2">
+              <div key={`${item.product.id}-${item.variant?.name ?? 'standard'}`} className="py-3 space-y-2">
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <p className="text-sm font-semibold text-slate-900 truncate">
-                      {item.product.name}
+                      {item.product.name}{item.variant ? ` · ${item.variant.name}` : ''}
                     </p>
                     <p className="text-xs text-slate-500 font-mono-num">
-                      {formatAriary(item.product.price, currency)} ×{' '}
+                      {formatAriary(unitPrice, currency)} ×{' '}
                       {item.quantity} · {item.product.product_type === 'HOMEMADE' ? 'Fabrication maison' : `Stock max : ${item.product.stock_qty}`}
                     </p>
                   </div>
@@ -315,7 +318,7 @@ export const PosPage: React.FC<PosPageProps> = ({
                     </span>
                     <button
                       type="button"
-                      onClick={() => removeFromCart(item.product.id)}
+                      onClick={() => removeFromCart(item.product.id, item.variant?.name)}
                       className="min-h-[36px] min-w-[36px] flex items-center justify-center rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 cursor-pointer"
                       aria-label={`Supprimer ${item.product.name}`}
                     >
@@ -328,7 +331,7 @@ export const PosPage: React.FC<PosPageProps> = ({
                   <button
                     type="button"
                     onClick={() =>
-                      updateCartQuantity(item.product.id, item.quantity - 1)
+                      updateCartQuantity(item.product.id, item.quantity - 1, item.variant?.name)
                     }
                     className="min-h-[40px] min-w-[40px] rounded-xl border border-slate-300 bg-white flex items-center justify-center text-slate-700 hover:bg-slate-50 cursor-pointer"
                     aria-label="Diminuer la quantité"
@@ -343,7 +346,7 @@ export const PosPage: React.FC<PosPageProps> = ({
                     onChange={(e) => {
                       const val = parseInt(e.target.value, 10);
                       if (!Number.isNaN(val)) {
-                        updateCartQuantity(item.product.id, val);
+                        updateCartQuantity(item.product.id, val, item.variant?.name);
                       }
                     }}
                     className="w-16 min-h-[40px] text-center font-mono-num text-sm font-semibold rounded-xl border border-slate-300 bg-white focus:outline-none focus:border-[#0F294A]"
@@ -352,7 +355,7 @@ export const PosPage: React.FC<PosPageProps> = ({
                   <button
                     type="button"
                     onClick={() =>
-                      updateCartQuantity(item.product.id, item.quantity + 1)
+                      updateCartQuantity(item.product.id, item.quantity + 1, item.variant?.name)
                     }
                     disabled={item.product.product_type !== 'HOMEMADE' && item.quantity >= item.product.stock_qty}
                     className="min-h-[40px] min-w-[40px] rounded-xl border border-slate-300 bg-white flex items-center justify-center text-slate-700 hover:bg-slate-50 disabled:opacity-40 cursor-pointer"
@@ -566,7 +569,7 @@ export const PosPage: React.FC<PosPageProps> = ({
 
                     <div className="mt-4 flex items-end justify-between gap-2">
                       <span className="text-base font-extrabold text-[#0F294A] font-mono-num">
-                        {formatAriary(product.price, currency)}
+                        {formatAriary(product.price, currency)}{product.product_type === 'HOMEMADE' ? ' / Simple' : ''}
                       </span>
                       <span
                         className={`text-xs font-medium font-mono-num ${
@@ -735,6 +738,7 @@ export const PosPage: React.FC<PosPageProps> = ({
         settings={settings}
         onClose={() => setThermalPreviewSale(null)}
       />
+      {selectedVariantProduct && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"><div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl"><h2 className="text-lg font-bold text-slate-900">Choisir le format</h2><p className="mt-1 text-sm text-slate-500">{selectedVariantProduct.name}</p><div className="mt-4 grid grid-cols-2 gap-3"><button type="button" onClick={()=>{addToCart(selectedVariantProduct,{name:'Simple',price:selectedVariantProduct.price,portions:1});setSelectedVariantProduct(null);}} className="rounded-xl border border-slate-300 p-4 text-left hover:border-blue-600"><strong className="block">Simple</strong><span className="mt-1 block text-sm">{formatAriary(selectedVariantProduct.price,currency)}</span><span className="text-xs text-slate-500">1 portion</span></button><button type="button" onClick={()=>{addToCart(selectedVariantProduct,{name:'Double',price:selectedVariantProduct.price*2,portions:2});setSelectedVariantProduct(null);}} className="rounded-xl border border-slate-300 p-4 text-left hover:border-blue-600"><strong className="block">Double</strong><span className="mt-1 block text-sm">{formatAriary(selectedVariantProduct.price*2,currency)}</span><span className="text-xs text-slate-500">2 portions</span></button></div><button type="button" onClick={()=>setSelectedVariantProduct(null)} className="mt-4 w-full rounded-xl border border-slate-300 p-2 text-sm">Annuler</button></div></div>}
     </div>
   );
 };

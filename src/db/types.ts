@@ -53,6 +53,7 @@ export interface SaleDetail {
   unit_price: number;
   quantity: number;
   subtotal: number;
+  stock_units?: number;
 }
 
 export interface SaleWithDetails extends Sale {
@@ -108,6 +109,7 @@ export type ExportPeriod =
 export interface CartItem {
   product: Product;
   quantity: number;
+  variant?: { name: string; price: number; portions: number };
 }
 
 export interface DailySalesPoint {

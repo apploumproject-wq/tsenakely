@@ -270,6 +270,18 @@ class TsenakelyDatabase {
         updated_at TEXT NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS production_batches (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, product_id INTEGER NOT NULL,
+        product_name TEXT NOT NULL, produced_at TEXT NOT NULL, closed_at TEXT,
+        total_cost REAL NOT NULL DEFAULT 0, sold_quantity INTEGER, revenue REAL,
+        profit REAL, status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK(status IN ('ACTIVE','CLOSED'))
+      );
+      CREATE TABLE IF NOT EXISTS production_ingredients (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, batch_id INTEGER NOT NULL, name TEXT NOT NULL,
+        purchase_quantity REAL NOT NULL, purchase_unit TEXT NOT NULL, purchase_price REAL NOT NULL,
+        used_quantity REAL NOT NULL, used_unit TEXT NOT NULL, used_cost REAL NOT NULL,
+        FOREIGN KEY (batch_id) REFERENCES production_batches(id) ON DELETE CASCADE
+      );
       CREATE TABLE IF NOT EXISTS sales (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         sale_number TEXT NOT NULL UNIQUE,
@@ -322,6 +334,7 @@ class TsenakelyDatabase {
     const productColumns = queryAll<{name: string}>(db, `PRAGMA table_info(products)`).map((column) => column.name);
     const saleColumns = queryAll<{name: string}>(db, `PRAGMA table_info(sales)`).map((column) => column.name);
     let schemaChanged = false;
+    if (!productColumns.includes('product_type')) { db.run(`ALTER TABLE products ADD COLUMN product_type TEXT NOT NULL DEFAULT 'FINISHED'`); schemaChanged = true; }
     if (!productColumns.includes('image_data_url')) { db.run(`ALTER TABLE products ADD COLUMN image_data_url TEXT`); schemaChanged = true; }
     if (!productColumns.includes('category')) {
       db.run(`ALTER TABLE products ADD COLUMN category TEXT NOT NULL DEFAULT 'Autres'`);
@@ -677,6 +690,51 @@ class TsenakelyDatabase {
     await this.persistOrRestore(previousSnapshot);
   }
 
+  // ===================== FABRICATIONS MAISON =====================
+  async setProductType(productId: number, productType: 'FINISHED' | 'HOMEMADE'): Promise<void> {
+    await this.init(); const db = this.getDb();
+    const active = queryOne<{id:number}>(db, `SELECT id FROM production_batches WHERE product_id=? AND status='ACTIVE'`, [productId]);
+    if (active && productType === 'FINISHED') throw new Error('Clôturez la fabrication en cours avant de convertir ce produit.');
+    const snapshot=db.export(); db.run(`UPDATE products SET product_type=?, updated_at=? WHERE id=?`, [productType,new Date().toISOString(),productId]); await this.persistOrRestore(snapshot);
+  }
+  async getProductionBatches(): Promise<import('./types').ProductionBatch[]> {
+    await this.init(); const db=this.getDb();
+    const batches=queryAll<Omit<import('./types').ProductionBatch,'ingredients'>>(db,`SELECT * FROM production_batches ORDER BY produced_at DESC,id DESC`);
+    return batches.map(batch=>({...batch,ingredients:queryAll<import('./types').ProductionIngredient>(db,`SELECT * FROM production_ingredients WHERE batch_id=? ORDER BY id ASC`,[batch.id])}));
+  }
+  async startProduction(productId:number, producedAt:string, ingredients:import('./types').ProductionIngredientInput[]):Promise<number>{
+    await this.init(); const db=this.getDb();
+    const product=queryOne<Product>(db,`SELECT * FROM products WHERE id=?`,[productId]);
+    if(!product) throw new Error('Produit introuvable.');
+    if(product.product_type!=='HOMEMADE') throw new Error('Ce produit n’est pas configuré en fabrication maison.');
+    if(queryOne<{id:number}>(db,`SELECT id FROM production_batches WHERE product_id=? AND status='ACTIVE'`,[productId])) throw new Error('Une fabrication est déjà en cours pour ce produit. Clôturez-la avant d’en démarrer une autre.');
+    if(!producedAt || Number.isNaN(Date.parse(producedAt))) throw new Error('La date de fabrication est invalide.');
+    if(!ingredients.length) throw new Error('Ajoutez au moins un ingrédient.');
+    let totalCost=0;
+    const prepared=ingredients.map(item=>{
+      if(!item.name.trim() || ![item.purchase_quantity,item.purchase_price,item.used_quantity].every(v=>Number.isFinite(v)&&v>0) || !item.purchase_unit.trim() || !item.used_unit.trim()) throw new Error('Vérifiez le nom, les quantités, les unités et les prix de chaque ingrédient.');
+      if(item.used_unit!==item.purchase_unit) throw new Error(`Les unités de « ${item.name} » doivent être identiques pour calculer le coût correctement.`);
+      if(item.used_quantity>item.purchase_quantity) throw new Error(`La quantité utilisée de « ${item.name} » dépasse la quantité achetée.`);
+      const usedCost=Math.round(item.used_quantity/item.purchase_quantity*item.purchase_price); totalCost+=usedCost; return {...item,usedCost};
+    });
+    const snapshot=db.export(); let transactionActive=false; db.run('BEGIN TRANSACTION;'); transactionActive=true;
+    try{
+      db.run(`INSERT INTO production_batches(product_id,product_name,produced_at,total_cost,status) VALUES(?,?,?,?,'ACTIVE')`,[productId,product.name,new Date(producedAt).toISOString(),totalCost]);
+      const batchId=queryOne<{id:number}>(db,`SELECT last_insert_rowid() as id`)!.id;
+      for(const item of prepared) db.run(`INSERT INTO production_ingredients(batch_id,name,purchase_quantity,purchase_unit,purchase_price,used_quantity,used_unit,used_cost) VALUES(?,?,?,?,?,?,?,?)`,[batchId,item.name.trim(),item.purchase_quantity,item.purchase_unit,item.purchase_price,item.used_quantity,item.used_unit,item.usedCost]);
+      db.run('COMMIT;'); transactionActive=false; await this.persistOrRestore(snapshot); return batchId;
+    }catch(error){if(transactionActive)db.run('ROLLBACK;');throw error;}
+  }
+  async closeProduction(batchId:number):Promise<void>{
+    await this.init(); const db=this.getDb();
+    const batch=queryOne<import('./types').ProductionBatch>(db,`SELECT * FROM production_batches WHERE id=? AND status='ACTIVE'`,[batchId]);
+    if(!batch) throw new Error('Cette fabrication est introuvable ou déjà clôturée.');
+    const now=new Date().toISOString();
+    const sales=queryOne<{quantity:number;revenue:number}>(db,`SELECT COALESCE(SUM(sd.quantity),0) as quantity,COALESCE(SUM(sd.subtotal),0) as revenue FROM sale_details sd INNER JOIN sales s ON s.id=sd.sale_id WHERE sd.product_id=? AND s.status='COMPLETED' AND s.sale_date>=? AND s.sale_date<=?`,[batch.product_id,batch.produced_at,now]);
+    const quantity=sales?.quantity??0, revenue=sales?.revenue??0, snapshot=db.export();
+    db.run(`UPDATE production_batches SET closed_at=?,sold_quantity=?,revenue=?,profit=?,status='CLOSED' WHERE id=?`,[now,quantity,revenue,revenue-batch.total_cost,batchId]);
+    await this.persistOrRestore(snapshot);
+  }
   // ===================== PRODUITS & STOCKS =====================
 
   async getProductCategories(): Promise<string[]> {

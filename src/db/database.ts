@@ -859,6 +859,7 @@ class TsenakelyDatabase {
       await this.persistOrRestore(previousSnapshot);
       return {
         id: productId,
+        product_type: 'FINISHED',
         name,
         price: Math.round(input.price),
         stock_qty: input.stock_qty,
@@ -1809,6 +1810,8 @@ class TsenakelyDatabase {
       sales: queryAll(db, `SELECT * FROM sales`),
       sale_details: queryAll(db, `SELECT * FROM sale_details`),
       stock_movements: queryAll(db, `SELECT * FROM stock_movements`),
+      production_batches: queryAll(db, `SELECT * FROM production_batches`),
+      production_ingredients: queryAll(db, `SELECT * FROM production_ingredients`),
     };
     return JSON.stringify(payload, null, 2);
   }
@@ -1844,6 +1847,8 @@ class TsenakelyDatabase {
     try {
       db.run(`DELETE FROM sale_details`);
       db.run(`DELETE FROM sales`);
+      db.run(`DELETE FROM production_ingredients`);
+      db.run(`DELETE FROM production_batches`);
       db.run(`DELETE FROM stock_movements`);
       db.run(`DELETE FROM products`);
       db.run(`DELETE FROM users`);

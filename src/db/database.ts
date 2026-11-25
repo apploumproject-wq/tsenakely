@@ -1731,16 +1731,6 @@ class TsenakelyDatabase {
         );
       }
 
-      if (Array.isArray(parsed.production_batches)) {
-        for (const b of parsed.production_batches as Array<{id:number;product_id:number;product_name:string;produced_at:string;closed_at:string|null;total_cost:number;sold_quantity:number|null;revenue:number|null;profit:number|null;status:string}>) {
-          db.run(`INSERT INTO production_batches(id,product_id,product_name,produced_at,closed_at,total_cost,sold_quantity,revenue,profit,status) VALUES(?,?,?,?,?,?,?,?,?,?)`,[b.id,b.product_id,b.product_name,b.produced_at,b.closed_at??null,b.total_cost,b.sold_quantity??null,b.revenue??null,b.profit??null,b.status]);
-        }
-      }
-      if (Array.isArray(parsed.production_ingredients)) {
-        for (const i of parsed.production_ingredients as Array<{id:number;batch_id:number;name:string;purchase_quantity:number;purchase_unit:string;purchase_price:number;used_quantity:number;used_unit:string;used_cost:number}>) {
-          db.run(`INSERT INTO production_ingredients(id,batch_id,name,purchase_quantity,purchase_unit,purchase_price,used_quantity,used_unit,used_cost) VALUES(?,?,?,?,?,?,?,?,?)`,[i.id,i.batch_id,i.name,i.purchase_quantity,i.purchase_unit,i.purchase_price,i.used_quantity,i.used_unit,i.used_cost]);
-        }
-      }
       db.run('COMMIT;');
       transactionActive = false;
       await this.persistOrRestore(previousSnapshot);
@@ -2028,6 +2018,16 @@ class TsenakelyDatabase {
         );
       }
 
+      if (Array.isArray(parsed.production_batches)) {
+        for (const b of parsed.production_batches as Array<{id:number;product_id:number;product_name:string;produced_at:string;closed_at:string|null;total_cost:number;sold_quantity:number|null;revenue:number|null;profit:number|null;status:string}>) {
+          db.run(`INSERT INTO production_batches(id,product_id,product_name,produced_at,closed_at,total_cost,sold_quantity,revenue,profit,status) VALUES(?,?,?,?,?,?,?,?,?,?)`,[b.id,b.product_id,b.product_name,b.produced_at,b.closed_at??null,b.total_cost,b.sold_quantity??null,b.revenue??null,b.profit??null,b.status]);
+        }
+      }
+      if (Array.isArray(parsed.production_ingredients)) {
+        for (const i of parsed.production_ingredients as Array<{id:number;batch_id:number;name:string;purchase_quantity:number;purchase_unit:string;purchase_price:number;used_quantity:number;used_unit:string;used_cost:number}>) {
+          db.run(`INSERT INTO production_ingredients(id,batch_id,name,purchase_quantity,purchase_unit,purchase_price,used_quantity,used_unit,used_cost) VALUES(?,?,?,?,?,?,?,?,?)`,[i.id,i.batch_id,i.name,i.purchase_quantity,i.purchase_unit,i.purchase_price,i.used_quantity,i.used_unit,i.used_cost]);
+        }
+      }
       db.run('COMMIT;');
       transactionActive = false;
       db.run('PRAGMA foreign_keys = ON;');

@@ -302,7 +302,7 @@ export const PosPage: React.FC<PosPageProps> = ({
                     </p>
                     <p className="text-xs text-slate-500 font-mono-num">
                       {formatAriary(item.product.price, currency)} ×{' '}
-                      {item.quantity} · Stock max : {item.product.stock_qty}
+                      {item.quantity} · {item.product.product_type === 'HOMEMADE' ? 'Fabrication maison' : `Stock max : ${item.product.stock_qty}`}
                     </p>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
@@ -527,7 +527,7 @@ export const PosPage: React.FC<PosPageProps> = ({
                 const inCartQty = getCartQuantity(product.id);
                 const outOfStock = product.product_type !== 'HOMEMADE' && product.stock_qty === 0;
                 const lowStock =
-                  !outOfStock && product.stock_qty <= product.min_stock;
+                  product.product_type !== 'HOMEMADE' && !outOfStock && product.stock_qty <= product.min_stock;
 
                 return (
                   <button
@@ -575,7 +575,7 @@ export const PosPage: React.FC<PosPageProps> = ({
                       >
                         {outOfStock
                           ? 'Rupture'
-                          : `Stock : ${product.stock_qty}`}
+                          : product.product_type === 'HOMEMADE' ? 'Fabrication maison' : `Stock : ${product.stock_qty}`}
                       </span>
                     </div>
                   </button>

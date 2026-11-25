@@ -155,7 +155,7 @@ export type StatsPeriod =
   | 'year'
   | 'custom';
 
-export type NavTab = 'accueil' | 'vente' | 'historique' | 'statistiques' | 'parametres';
+export type NavTab = 'accueil' | 'vente' | 'produits' | 'historique' | 'statistiques' | 'parametres';
 
 
 export interface ProductionIngredientInput {

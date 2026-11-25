@@ -82,7 +82,7 @@ export const PosPage: React.FC<PosPageProps> = ({
             variant: item.variant,
           };
         })
-        .filter((x): x is CartItem => x !== null)
+        .filter((x): x is NonNullable<typeof x> => x !== null)
     );
   }, []);
 

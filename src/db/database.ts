@@ -270,6 +270,18 @@ class TsenakelyDatabase {
         updated_at TEXT NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS production_batches (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, product_id INTEGER NOT NULL,
+        product_name TEXT NOT NULL, produced_at TEXT NOT NULL, closed_at TEXT,
+        total_cost REAL NOT NULL DEFAULT 0, sold_quantity INTEGER, revenue REAL,
+        profit REAL, status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK(status IN ('ACTIVE','CLOSED'))
+      );
+      CREATE TABLE IF NOT EXISTS production_ingredients (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, batch_id INTEGER NOT NULL, name TEXT NOT NULL,
+        purchase_quantity REAL NOT NULL, purchase_unit TEXT NOT NULL, purchase_price REAL NOT NULL,
+        used_quantity REAL NOT NULL, used_unit TEXT NOT NULL, used_cost REAL NOT NULL,
+        FOREIGN KEY (batch_id) REFERENCES production_batches(id) ON DELETE CASCADE
+      );
       CREATE TABLE IF NOT EXISTS sales (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         sale_number TEXT NOT NULL UNIQUE,
@@ -322,6 +334,7 @@ class TsenakelyDatabase {
     const productColumns = queryAll<{name: string}>(db, `PRAGMA table_info(products)`).map((column) => column.name);
     const saleColumns = queryAll<{name: string}>(db, `PRAGMA table_info(sales)`).map((column) => column.name);
     let schemaChanged = false;
+    if (!productColumns.includes('product_type')) { db.run(`ALTER TABLE products ADD COLUMN product_type TEXT NOT NULL DEFAULT 'FINISHED'`); schemaChanged = true; }
     if (!productColumns.includes('image_data_url')) { db.run(`ALTER TABLE products ADD COLUMN image_data_url TEXT`); schemaChanged = true; }
     if (!productColumns.includes('category')) {
       db.run(`ALTER TABLE products ADD COLUMN category TEXT NOT NULL DEFAULT 'Autres'`);
@@ -677,6 +690,56 @@ class TsenakelyDatabase {
     await this.persistOrRestore(previousSnapshot);
   }
 
+  // ===================== FABRICATIONS MAISON =====================
+  async setProductType(productId: number, productType: 'FINISHED' | 'HOMEMADE'): Promise<void> {
+    await this.init(); const db = this.getDb();
+    const active = queryOne<{id:number}>(db, `SELECT id FROM production_batches WHERE product_id=? AND status='ACTIVE'`, [productId]);
+    if (active && productType === 'FINISHED') throw new Error('Clôturez la fabrication en cours avant de convertir ce produit.');
+    const snapshot=db.export(); db.run(`UPDATE products SET product_type=?, updated_at=? WHERE id=?`, [productType,new Date().toISOString(),productId]); await this.persistOrRestore(snapshot);
+  }
+  async getProductionBatches(): Promise<import('./types').ProductionBatch[]> {
+    await this.init(); const db=this.getDb();
+    const batches=queryAll<Omit<import('./types').ProductionBatch,'ingredients'>>(db,`SELECT * FROM production_batches ORDER BY produced_at DESC,id DESC`);
+    return batches.map(batch=>{
+      const live=batch.status==='ACTIVE'
+        ? queryOne<{quantity:number;revenue:number}>(db,`SELECT COALESCE(SUM(sd.quantity),0) as quantity,COALESCE(SUM(sd.subtotal),0) as revenue FROM sale_details sd INNER JOIN sales s ON s.id=sd.sale_id WHERE sd.product_id=? AND s.status='COMPLETED' AND s.sale_date>=? AND s.sale_date<=?`,[batch.product_id,batch.produced_at,new Date().toISOString()])
+        : null;
+      return {...batch,sold_quantity:batch.status==='ACTIVE'?(live?.quantity??0):batch.sold_quantity,revenue:batch.status==='ACTIVE'?(live?.revenue??0):batch.revenue,ingredients:queryAll<import('./types').ProductionIngredient>(db,`SELECT * FROM production_ingredients WHERE batch_id=? ORDER BY id ASC`,[batch.id])};
+    });
+  }
+  async startProduction(productId:number, producedAt:string, ingredients:import('./types').ProductionIngredientInput[]):Promise<number>{
+    await this.init(); const db=this.getDb();
+    const product=queryOne<Product>(db,`SELECT * FROM products WHERE id=?`,[productId]);
+    if(!product) throw new Error('Produit introuvable.');
+    if(product.product_type!=='HOMEMADE') throw new Error('Ce produit n’est pas configuré en fabrication maison.');
+    if(queryOne<{id:number}>(db,`SELECT id FROM production_batches WHERE product_id=? AND status='ACTIVE'`,[productId])) throw new Error('Une fabrication est déjà en cours pour ce produit. Clôturez-la avant d’en démarrer une autre.');
+    if(!producedAt || Number.isNaN(Date.parse(producedAt))) throw new Error('La date de fabrication est invalide.');
+    if(!ingredients.length) throw new Error('Ajoutez au moins un ingrédient.');
+    let totalCost=0;
+    const prepared=ingredients.map(item=>{
+      if(!item.name.trim() || ![item.purchase_quantity,item.purchase_price,item.used_quantity].every(v=>Number.isFinite(v)&&v>0) || !item.purchase_unit.trim() || !item.used_unit.trim()) throw new Error('Vérifiez le nom, les quantités, les unités et les prix de chaque ingrédient.');
+      if(item.used_unit!==item.purchase_unit) throw new Error(`Les unités de « ${item.name} » doivent être identiques pour calculer le coût correctement.`);
+      if(item.used_quantity>item.purchase_quantity) throw new Error(`La quantité utilisée de « ${item.name} » dépasse la quantité achetée.`);
+      const usedCost=Math.round(item.used_quantity/item.purchase_quantity*item.purchase_price); totalCost+=usedCost; return {...item,usedCost};
+    });
+    const snapshot=db.export(); let transactionActive=false; db.run('BEGIN TRANSACTION;'); transactionActive=true;
+    try{
+      db.run(`INSERT INTO production_batches(product_id,product_name,produced_at,total_cost,status) VALUES(?,?,?,?,'ACTIVE')`,[productId,product.name,new Date(producedAt).toISOString(),totalCost]);
+      const batchId=queryOne<{id:number}>(db,`SELECT last_insert_rowid() as id`)!.id;
+      for(const item of prepared) db.run(`INSERT INTO production_ingredients(batch_id,name,purchase_quantity,purchase_unit,purchase_price,used_quantity,used_unit,used_cost) VALUES(?,?,?,?,?,?,?,?)`,[batchId,item.name.trim(),item.purchase_quantity,item.purchase_unit,item.purchase_price,item.used_quantity,item.used_unit,item.usedCost]);
+      db.run('COMMIT;'); transactionActive=false; await this.persistOrRestore(snapshot); return batchId;
+    }catch(error){if(transactionActive)db.run('ROLLBACK;');throw error;}
+  }
+  async closeProduction(batchId:number):Promise<void>{
+    await this.init(); const db=this.getDb();
+    const batch=queryOne<import('./types').ProductionBatch>(db,`SELECT * FROM production_batches WHERE id=? AND status='ACTIVE'`,[batchId]);
+    if(!batch) throw new Error('Cette fabrication est introuvable ou déjà clôturée.');
+    const now=new Date().toISOString();
+    const sales=queryOne<{quantity:number;revenue:number}>(db,`SELECT COALESCE(SUM(sd.quantity),0) as quantity,COALESCE(SUM(sd.subtotal),0) as revenue FROM sale_details sd INNER JOIN sales s ON s.id=sd.sale_id WHERE sd.product_id=? AND s.status='COMPLETED' AND s.sale_date>=? AND s.sale_date<=?`,[batch.product_id,batch.produced_at,now]);
+    const quantity=sales?.quantity??0, revenue=sales?.revenue??0, snapshot=db.export();
+    db.run(`UPDATE production_batches SET closed_at=?,sold_quantity=?,revenue=?,profit=?,status='CLOSED' WHERE id=?`,[now,quantity,revenue,revenue-batch.total_cost,batchId]);
+    await this.persistOrRestore(snapshot);
+  }
   // ===================== PRODUITS & STOCKS =====================
 
   async getProductCategories(): Promise<string[]> {
@@ -734,11 +797,11 @@ class TsenakelyDatabase {
     if (q) {
       return queryAll<Product>(
         db,
-        `SELECT * FROM products WHERE name LIKE ? ORDER BY name ASC`,
+        `SELECT p.*, EXISTS(SELECT 1 FROM production_batches b WHERE b.product_id=p.id AND b.status='ACTIVE') as has_active_production FROM products p WHERE p.name LIKE ? ORDER BY p.name ASC`,
         [`%${q}%`]
       );
     }
-    return queryAll<Product>(db, `SELECT * FROM products ORDER BY name ASC`);
+    return queryAll<Product>(db, `SELECT p.*, EXISTS(SELECT 1 FROM production_batches b WHERE b.product_id=p.id AND b.status='ACTIVE') as has_active_production FROM products p ORDER BY p.name ASC`);
   }
 
   async addProduct(
@@ -801,6 +864,7 @@ class TsenakelyDatabase {
       await this.persistOrRestore(previousSnapshot);
       return {
         id: productId,
+        product_type: 'FINISHED',
         name,
         price: Math.round(input.price),
         stock_qty: input.stock_qty,
@@ -987,7 +1051,10 @@ class TsenakelyDatabase {
         if (!liveProduct) {
           throw new Error(`Produit introuvable : ${item.product.name}.`);
         }
-        if (liveProduct.stock_qty < item.quantity) {
+        if (liveProduct.product_type === 'HOMEMADE' && !queryOne<{id:number}>(db, `SELECT id FROM production_batches WHERE product_id=? AND status='ACTIVE'`, [liveProduct.id])) {
+          throw new Error(`Aucune fabrication en cours pour « ${liveProduct.name} ». Démarrez une fabrication avant d’enregistrer des ventes.`);
+        }
+        if (liveProduct.product_type !== 'HOMEMADE' && liveProduct.stock_qty < item.quantity) {
           throw new Error(
             `Stock insuffisant pour « ${liveProduct.name} » (disponible : ${liveProduct.stock_qty}, demandé : ${item.quantity}).`
           );
@@ -1066,26 +1133,18 @@ class TsenakelyDatabase {
           subtotal: entry.subtotal,
         });
 
-        const newStock = entry.product.stock_qty - entry.quantity;
-        db.run(
-          `UPDATE products SET stock_qty = ?, updated_at = ? WHERE id = ?`,
-          [newStock, nowIso, entry.product.id]
-        );
-
-        db.run(
-          `INSERT INTO stock_movements (product_id, product_name, movement_type, qty_change, qty_before, qty_after, reason, user_name, created_at)
-           VALUES (?, ?, 'SALE', ?, ?, ?, ?, ?, ?)`,
-          [
-            entry.product.id,
-            entry.product.name,
-            -entry.quantity,
-            entry.product.stock_qty,
-            newStock,
-            `Vente ${saleNumber}`,
-            user.full_name,
-            nowIso,
-          ]
-        );
+        if (entry.product.product_type !== 'HOMEMADE') {
+          const newStock = entry.product.stock_qty - entry.quantity;
+          db.run(
+            `UPDATE products SET stock_qty = ?, updated_at = ? WHERE id = ?`,
+            [newStock, nowIso, entry.product.id]
+          );
+          db.run(
+            `INSERT INTO stock_movements (product_id, product_name, movement_type, qty_change, qty_before, qty_after, reason, user_name, created_at)
+             VALUES (?, ?, 'SALE', ?, ?, ?, ?, ?, ?)`,
+            [entry.product.id, entry.product.name, -entry.quantity, entry.product.stock_qty, newStock, `Vente ${saleNumber}`, user.full_name, nowIso]
+          );
+        }
       }
 
       db.run('COMMIT;');
@@ -1265,7 +1324,7 @@ class TsenakelyDatabase {
             `SELECT * FROM products WHERE id = ?`,
             [detail.product_id]
           );
-          if (prod) {
+          if (prod && prod.product_type !== 'HOMEMADE') {
             const restoredQty = prod.stock_qty + detail.quantity;
             db.run(
               `UPDATE products SET stock_qty = ?, updated_at = ? WHERE id = ?`,
@@ -1340,12 +1399,13 @@ class TsenakelyDatabase {
     );
 
     const totalProducts = products.length;
-    const totalStockUnits = products.reduce((sum, p) => sum + p.stock_qty, 0);
-    const outOfStockCount = products.filter((p) => p.stock_qty === 0).length;
-    const lowStockCount = products.filter(
+    const stockManagedProducts = products.filter((p) => p.product_type !== 'HOMEMADE');
+    const totalStockUnits = stockManagedProducts.reduce((sum, p) => sum + p.stock_qty, 0);
+    const outOfStockCount = stockManagedProducts.filter((p) => p.stock_qty === 0).length;
+    const lowStockCount = stockManagedProducts.filter(
       (p) => p.stock_qty > 0 && p.stock_qty <= p.min_stock
     ).length;
-    const alertProducts = products.filter((p) => p.stock_qty <= p.min_stock);
+    const alertProducts = stockManagedProducts.filter((p) => p.stock_qty <= p.min_stock);
 
     // 7 derniers jours
     const sevenDaysStart = new Date(
@@ -1670,6 +1730,7 @@ class TsenakelyDatabase {
           [k, v]
         );
       }
+
       db.run('COMMIT;');
       transactionActive = false;
       await this.persistOrRestore(previousSnapshot);
@@ -1751,6 +1812,8 @@ class TsenakelyDatabase {
       sales: queryAll(db, `SELECT * FROM sales`),
       sale_details: queryAll(db, `SELECT * FROM sale_details`),
       stock_movements: queryAll(db, `SELECT * FROM stock_movements`),
+      production_batches: queryAll(db, `SELECT * FROM production_batches`),
+      production_ingredients: queryAll(db, `SELECT * FROM production_ingredients`),
     };
     return JSON.stringify(payload, null, 2);
   }
@@ -1786,6 +1849,8 @@ class TsenakelyDatabase {
     try {
       db.run(`DELETE FROM sale_details`);
       db.run(`DELETE FROM sales`);
+      db.run(`DELETE FROM production_ingredients`);
+      db.run(`DELETE FROM production_batches`);
       db.run(`DELETE FROM stock_movements`);
       db.run(`DELETE FROM products`);
       db.run(`DELETE FROM users`);
@@ -1830,6 +1895,8 @@ class TsenakelyDatabase {
       for (const p of parsed.products as Array<{
         id: number;
         name: string;
+        product_type?: 'FINISHED' | 'HOMEMADE';
+        category?: string;
         price: number;
         stock_qty: number;
         min_stock: number;
@@ -1838,15 +1905,17 @@ class TsenakelyDatabase {
         updated_at: string;
       }>) {
         db.run(
-          `INSERT INTO products (id, name, price, stock_qty, min_stock, image_data_url, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO products (id, name, product_type, price, stock_qty, min_stock, image_data_url, category, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             p.id,
             p.name,
+            p.product_type ?? 'FINISHED',
             p.price,
             p.stock_qty,
             p.min_stock,
             p.image_data_url ?? null,
+            p.category ?? 'Autres',
             p.created_at,
             p.updated_at,
           ]
@@ -1949,6 +2018,16 @@ class TsenakelyDatabase {
         );
       }
 
+      if (Array.isArray(parsed.production_batches)) {
+        for (const b of parsed.production_batches as Array<{id:number;product_id:number;product_name:string;produced_at:string;closed_at:string|null;total_cost:number;sold_quantity:number|null;revenue:number|null;profit:number|null;status:string}>) {
+          db.run(`INSERT INTO production_batches(id,product_id,product_name,produced_at,closed_at,total_cost,sold_quantity,revenue,profit,status) VALUES(?,?,?,?,?,?,?,?,?,?)`,[b.id,b.product_id,b.product_name,b.produced_at,b.closed_at??null,b.total_cost,b.sold_quantity??null,b.revenue??null,b.profit??null,b.status]);
+        }
+      }
+      if (Array.isArray(parsed.production_ingredients)) {
+        for (const i of parsed.production_ingredients as Array<{id:number;batch_id:number;name:string;purchase_quantity:number;purchase_unit:string;purchase_price:number;used_quantity:number;used_unit:string;used_cost:number}>) {
+          db.run(`INSERT INTO production_ingredients(id,batch_id,name,purchase_quantity,purchase_unit,purchase_price,used_quantity,used_unit,used_cost) VALUES(?,?,?,?,?,?,?,?,?)`,[i.id,i.batch_id,i.name,i.purchase_quantity,i.purchase_unit,i.purchase_price,i.used_quantity,i.used_unit,i.used_cost]);
+        }
+      }
       db.run('COMMIT;');
       transactionActive = false;
       db.run('PRAGMA foreign_keys = ON;');

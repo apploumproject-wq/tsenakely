@@ -74,10 +74,10 @@ export const PosPage: React.FC<PosPageProps> = ({
       prev
         .map((item) => {
           const fresh = list.find((p) => p.id === item.product.id);
-          if (!fresh || fresh.stock_qty <= 0) return null;
+          if (!fresh || (fresh.product_type !== 'HOMEMADE' && fresh.stock_qty <= 0)) return null;
           return {
             product: fresh,
-            quantity: Math.min(item.quantity, fresh.stock_qty),
+            quantity: fresh.product_type === 'HOMEMADE' ? item.quantity : Math.min(item.quantity, fresh.stock_qty),
           };
         })
         .filter((x): x is CartItem => x !== null)
@@ -132,7 +132,11 @@ export const PosPage: React.FC<PosPageProps> = ({
 
   const addToCart = (product: Product) => {
     setError('');
-    if (product.stock_qty <= 0) {
+    if (product.product_type === 'HOMEMADE' && !product.has_active_production) {
+      setError(`Aucune fabrication en cours pour « ${product.name} ».`);
+      return;
+    }
+    if (product.product_type !== 'HOMEMADE' && product.stock_qty <= 0) {
       setError(`« ${product.name} » est en rupture de stock.`);
       return;
     }
@@ -140,7 +144,7 @@ export const PosPage: React.FC<PosPageProps> = ({
       const idx = prev.findIndex((i) => i.product.id === product.id);
       if (idx >= 0) {
         const currentQty = prev[idx].quantity;
-        if (currentQty >= product.stock_qty) {
+        if (product.product_type !== 'HOMEMADE' && currentQty >= product.stock_qty) {
           setError(
             `Stock maximum atteint pour « ${product.name} » (${product.stock_qty} disponible${
               product.stock_qty > 1 ? 's' : ''
@@ -165,7 +169,7 @@ export const PosPage: React.FC<PosPageProps> = ({
     setCart((prev) =>
       prev.map((item) => {
         if (item.product.id !== productId) return item;
-        if (nextQty > item.product.stock_qty) {
+        if (item.product.product_type !== 'HOMEMADE' && nextQty > item.product.stock_qty) {
           setError(
             `Stock disponible insuffisant pour « ${item.product.name} » (max ${item.product.stock_qty}).`
           );
@@ -302,7 +306,7 @@ export const PosPage: React.FC<PosPageProps> = ({
                     </p>
                     <p className="text-xs text-slate-500 font-mono-num">
                       {formatAriary(item.product.price, currency)} ×{' '}
-                      {item.quantity} · Stock max : {item.product.stock_qty}
+                      {item.quantity} · {item.product.product_type === 'HOMEMADE' ? 'Fabrication maison' : `Stock max : ${item.product.stock_qty}`}
                     </p>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
@@ -334,7 +338,7 @@ export const PosPage: React.FC<PosPageProps> = ({
                   <input
                     type="number"
                     min={1}
-                    max={item.product.stock_qty}
+                    max={item.product.product_type === 'HOMEMADE' ? undefined : item.product.stock_qty}
                     value={item.quantity}
                     onChange={(e) => {
                       const val = parseInt(e.target.value, 10);
@@ -350,7 +354,7 @@ export const PosPage: React.FC<PosPageProps> = ({
                     onClick={() =>
                       updateCartQuantity(item.product.id, item.quantity + 1)
                     }
-                    disabled={item.quantity >= item.product.stock_qty}
+                    disabled={item.product.product_type !== 'HOMEMADE' && item.quantity >= item.product.stock_qty}
                     className="min-h-[40px] min-w-[40px] rounded-xl border border-slate-300 bg-white flex items-center justify-center text-slate-700 hover:bg-slate-50 disabled:opacity-40 cursor-pointer"
                     aria-label="Augmenter la quantité"
                   >
@@ -525,9 +529,9 @@ export const PosPage: React.FC<PosPageProps> = ({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
               {visibleProducts.map((product) => {
                 const inCartQty = getCartQuantity(product.id);
-                const outOfStock = product.stock_qty === 0;
+                const outOfStock = product.product_type === 'HOMEMADE' ? !product.has_active_production : product.stock_qty === 0;
                 const lowStock =
-                  !outOfStock && product.stock_qty <= product.min_stock;
+                  product.product_type !== 'HOMEMADE' && !outOfStock && product.stock_qty <= product.min_stock;
 
                 return (
                   <button
@@ -574,8 +578,8 @@ export const PosPage: React.FC<PosPageProps> = ({
                         }`}
                       >
                         {outOfStock
-                          ? 'Rupture'
-                          : `Stock : ${product.stock_qty}`}
+                          ? (product.product_type === 'HOMEMADE' ? 'Aucune fabrication active' : 'Rupture')
+                          : product.product_type === 'HOMEMADE' ? 'Fabrication maison' : `Stock : ${product.stock_qty}`}
                       </span>
                     </div>
                   </button>

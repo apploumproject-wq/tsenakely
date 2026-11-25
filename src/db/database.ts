@@ -700,7 +700,12 @@ class TsenakelyDatabase {
   async getProductionBatches(): Promise<import('./types').ProductionBatch[]> {
     await this.init(); const db=this.getDb();
     const batches=queryAll<Omit<import('./types').ProductionBatch,'ingredients'>>(db,`SELECT * FROM production_batches ORDER BY produced_at DESC,id DESC`);
-    return batches.map(batch=>({...batch,ingredients:queryAll<import('./types').ProductionIngredient>(db,`SELECT * FROM production_ingredients WHERE batch_id=? ORDER BY id ASC`,[batch.id])}));
+    return batches.map(batch=>{
+      const live=batch.status==='ACTIVE'
+        ? queryOne<{quantity:number;revenue:number}>(db,`SELECT COALESCE(SUM(sd.quantity),0) as quantity,COALESCE(SUM(sd.subtotal),0) as revenue FROM sale_details sd INNER JOIN sales s ON s.id=sd.sale_id WHERE sd.product_id=? AND s.status='COMPLETED' AND s.sale_date>=? AND s.sale_date<=?`,[batch.product_id,batch.produced_at,new Date().toISOString()])
+        : null;
+      return {...batch,sold_quantity:batch.status==='ACTIVE'?(live?.quantity??0):batch.sold_quantity,revenue:batch.status==='ACTIVE'?(live?.revenue??0):batch.revenue,ingredients:queryAll<import('./types').ProductionIngredient>(db,`SELECT * FROM production_ingredients WHERE batch_id=? ORDER BY id ASC`,[batch.id])};
+    });
   }
   async startProduction(productId:number, producedAt:string, ingredients:import('./types').ProductionIngredientInput[]):Promise<number>{
     await this.init(); const db=this.getDb();

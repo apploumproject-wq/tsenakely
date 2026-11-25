@@ -79,6 +79,7 @@ export const PosPage: React.FC<PosPageProps> = ({
           return {
             product: fresh,
             quantity: fresh.product_type === 'HOMEMADE' ? item.quantity : Math.min(item.quantity, fresh.stock_qty),
+            variant: item.variant,
           };
         })
         .filter((x): x is CartItem => x !== null)

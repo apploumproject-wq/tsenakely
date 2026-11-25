@@ -1074,10 +1074,10 @@ class TsenakelyDatabase {
         }
         const variantName = item.variant_name?.trim() || null;
         const unitMultiplier = item.unit_multiplier ?? 1;
-        const unitPrice = item.unit_price ?? liveProduct.price;
-        if (!Number.isInteger(unitMultiplier) || unitMultiplier < 1 || unitMultiplier > 2 || !Number.isFinite(unitPrice) || unitPrice < 0) throw new Error(`Format ou prix invalide pour « ${liveProduct.name} ».`);
+        if (!Number.isInteger(unitMultiplier) || unitMultiplier < 1 || unitMultiplier > 2) throw new Error(`Format invalide pour « ${liveProduct.name} ».`);
+        const unitPrice = liveProduct.price * unitMultiplier;
         if (liveProduct.has_size_variants && (!variantName || (variantName === 'Simple' && unitMultiplier !== 1) || (variantName === 'Double' && unitMultiplier !== 2) || !['Simple','Double'].includes(variantName))) throw new Error(`Choisissez le format Simple ou Double pour « ${liveProduct.name} ».`);
-        if (!liveProduct.has_size_variants && variantName) throw new Error(`Ce produit ne propose pas de format multiple : « ${liveProduct.name} ».`);
+        if (!liveProduct.has_size_variants && (variantName || unitMultiplier !== 1)) throw new Error(`Ce produit ne propose pas de format multiple : « ${liveProduct.name} ».`);
         const subtotal = Math.round(unitPrice * item.quantity);
         totalAmount += subtotal;
         verifiedItems.push({product:liveProduct,quantity:item.quantity,subtotal,unit_price:unitPrice,variant_name:variantName,unit_multiplier:unitMultiplier});

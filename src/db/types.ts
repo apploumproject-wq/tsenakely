@@ -12,6 +12,7 @@ export interface User {
 export interface Product {
   id: number;
   product_type: 'FINISHED' | 'HOMEMADE';
+  has_active_production?: number | boolean;
   name: string;
   price: number;
   stock_qty: number;

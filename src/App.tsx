@@ -3,6 +3,7 @@ import {
   BarChart3,
   Clock,
   Home,
+  Package,
   LogOut,
   Settings,
   ShoppingCart,
@@ -23,6 +24,7 @@ import {DashboardPage} from './pages/DashboardPage';
 import {HistoryPage} from './pages/HistoryPage';
 import {LoginPage} from './pages/LoginPage';
 import {PosPage} from './pages/PosPage';
+import {ProductsPage} from './pages/ProductsPage';
 import {SettingsPage} from './pages/SettingsPage';
 import {StatsPage} from './pages/StatsPage';
 
@@ -49,6 +51,7 @@ const NAV_ITEMS: Array<{
 }> = [
   {id: 'accueil', label: 'Accueil', icon: Home},
   {id: 'vente', label: 'Vente', icon: ShoppingCart},
+  {id: 'produits', label: 'Produits', icon: Package},
   {id: 'historique', label: 'Historique', icon: Clock},
   {id: 'statistiques', label: 'Statistiques', icon: BarChart3},
   {id: 'parametres', label: 'Paramètres', icon: Settings},
@@ -294,6 +297,8 @@ export default function App() {
             />
           )}
 
+          {activeTab === 'produits' && (<ProductsPage currentUser={currentUser} refreshKey={refreshKey} onDataChanged={triggerRefresh} />)}
+
           {activeTab === 'historique' && (
             <HistoryPage
               settings={settings}
@@ -324,7 +329,7 @@ export default function App() {
 
       {/* Barre de navigation fixe en bas sur Mobile */}
       <nav
-        className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 grid grid-cols-5 items-center h-16 pb-safe no-print"
+        className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 grid grid-cols-6 items-center h-16 pb-safe no-print"
         aria-label="Navigation mobile"
       >
         {NAV_ITEMS.map((item) => {

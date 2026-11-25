@@ -53,7 +53,7 @@ export interface SaleDetail {
   unit_price: number;
   quantity: number;
   subtotal: number;
-  stock_units: number;
+  stock_units?: number;
 }
 
 export interface SaleWithDetails extends Sale {

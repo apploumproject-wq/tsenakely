@@ -309,6 +309,7 @@ class TsenakelyDatabase {
         unit_price REAL NOT NULL,
         quantity INTEGER NOT NULL CHECK(quantity > 0),
         subtotal REAL NOT NULL,
+        stock_units INTEGER NOT NULL DEFAULT 1,
         FOREIGN KEY (sale_id) REFERENCES sales(id) ON DELETE CASCADE
       );
 
@@ -331,6 +332,8 @@ class TsenakelyDatabase {
       CREATE INDEX IF NOT EXISTS idx_stock_movements_created ON stock_movements(created_at);
     `);
 
+    const detailColumns = queryAll<{name: string}>(db, `PRAGMA table_info(sale_details)`).map((column) => column.name);
+    if (!detailColumns.includes('stock_units')) { db.run(`ALTER TABLE sale_details ADD COLUMN stock_units INTEGER NOT NULL DEFAULT 1`); schemaChanged = true; }
     const productColumns = queryAll<{name: string}>(db, `PRAGMA table_info(products)`).map((column) => column.name);
     const saleColumns = queryAll<{name: string}>(db, `PRAGMA table_info(sales)`).map((column) => column.name);
     let schemaChanged = false;
@@ -702,7 +705,7 @@ class TsenakelyDatabase {
     const batches=queryAll<Omit<import('./types').ProductionBatch,'ingredients'>>(db,`SELECT * FROM production_batches ORDER BY produced_at DESC,id DESC`);
     return batches.map(batch=>{
       const live=batch.status==='ACTIVE'
-        ? queryOne<{quantity:number;revenue:number}>(db,`SELECT COALESCE(SUM(sd.quantity),0) as quantity,COALESCE(SUM(sd.subtotal),0) as revenue FROM sale_details sd INNER JOIN sales s ON s.id=sd.sale_id WHERE sd.product_id=? AND s.status='COMPLETED' AND s.sale_date>=? AND s.sale_date<=?`,[batch.product_id,batch.produced_at,new Date().toISOString()])
+        ? queryOne<{quantity:number;revenue:number}>(db,`SELECT COALESCE(SUM(COALESCE(sd.stock_units,sd.quantity)),0) as quantity,COALESCE(SUM(sd.subtotal),0) as revenue FROM sale_details sd INNER JOIN sales s ON s.id=sd.sale_id WHERE sd.product_id=? AND s.status='COMPLETED' AND s.sale_date>=? AND s.sale_date<=?`,[batch.product_id,batch.produced_at,new Date().toISOString()])
         : null;
       return {...batch,sold_quantity:batch.status==='ACTIVE'?(live?.quantity??0):batch.sold_quantity,revenue:batch.status==='ACTIVE'?(live?.revenue??0):batch.revenue,ingredients:queryAll<import('./types').ProductionIngredient>(db,`SELECT * FROM production_ingredients WHERE batch_id=? ORDER BY id ASC`,[batch.id])};
     });
@@ -1037,6 +1040,9 @@ class TsenakelyDatabase {
         product: Product;
         quantity: number;
         subtotal: number;
+        unitPrice: number;
+        stockUnits: number;
+        productName: string;
       }> = [];
 
       for (const item of items) {
@@ -1059,12 +1065,18 @@ class TsenakelyDatabase {
             `Stock insuffisant pour « ${liveProduct.name} » (disponible : ${liveProduct.stock_qty}, demandé : ${item.quantity}).`
           );
         }
-        const subtotal = Math.round(liveProduct.price * item.quantity);
+        const unitPrice = item.variant?.price ?? liveProduct.price;
+        const portions = item.variant?.portions ?? 1;
+        if (!Number.isFinite(unitPrice) || unitPrice < 0 || !Number.isInteger(portions) || portions < 1) throw new Error('Format de vente invalide.');
+        const subtotal = Math.round(unitPrice * item.quantity);
         totalAmount += subtotal;
         verifiedItems.push({
           product: liveProduct,
           quantity: item.quantity,
           subtotal,
+          unitPrice,
+          stockUnits: item.quantity * portions,
+          productName: item.variant ? `${liveProduct.name} (${item.variant.name})` : liveProduct.name,
         });
       }
 
@@ -1108,15 +1120,16 @@ class TsenakelyDatabase {
 
       for (const entry of verifiedItems) {
         db.run(
-          `INSERT INTO sale_details (sale_id, product_id, product_name, unit_price, quantity, subtotal)
-           VALUES (?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO sale_details (sale_id, product_id, product_name, unit_price, quantity, subtotal, stock_units)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
           [
             saleId,
             entry.product.id,
-            entry.product.name,
-            entry.product.price,
+            entry.productName,
+            entry.unitPrice,
             entry.quantity,
             entry.subtotal,
+            entry.stockUnits,
           ]
         );
         const detIdRow = queryOne<{id: number}>(
@@ -1127,14 +1140,15 @@ class TsenakelyDatabase {
           id: detIdRow!.id,
           sale_id: saleId,
           product_id: entry.product.id,
-          product_name: entry.product.name,
-          unit_price: entry.product.price,
+          product_name: entry.productName,
+          unit_price: entry.unitPrice,
           quantity: entry.quantity,
           subtotal: entry.subtotal,
+          stock_units: entry.stockUnits,
         });
 
         if (entry.product.product_type !== 'HOMEMADE') {
-          const newStock = entry.product.stock_qty - entry.quantity;
+          const newStock = entry.product.stock_qty - entry.stockUnits;
           db.run(
             `UPDATE products SET stock_qty = ?, updated_at = ? WHERE id = ?`,
             [newStock, nowIso, entry.product.id]
@@ -1142,7 +1156,7 @@ class TsenakelyDatabase {
           db.run(
             `INSERT INTO stock_movements (product_id, product_name, movement_type, qty_change, qty_before, qty_after, reason, user_name, created_at)
              VALUES (?, ?, 'SALE', ?, ?, ?, ?, ?, ?)`,
-            [entry.product.id, entry.product.name, -entry.quantity, entry.product.stock_qty, newStock, `Vente ${saleNumber}`, user.full_name, nowIso]
+            [entry.product.id, entry.product.name, -entry.stockUnits, entry.product.stock_qty, newStock, `Vente ${saleNumber}`, user.full_name, nowIso]
           );
         }
       }
@@ -1972,10 +1986,11 @@ class TsenakelyDatabase {
         unit_price: number;
         quantity: number;
         subtotal: number;
+        stock_units?: number;
       }>) {
         db.run(
-          `INSERT INTO sale_details (id, sale_id, product_id, product_name, unit_price, quantity, subtotal)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO sale_details (id, sale_id, product_id, product_name, unit_price, quantity, subtotal, stock_units)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             d.id,
             d.sale_id,
@@ -1984,6 +1999,7 @@ class TsenakelyDatabase {
             d.unit_price,
             d.quantity,
             d.subtotal,
+            d.stock_units ?? d.quantity,
           ]
         );
       }

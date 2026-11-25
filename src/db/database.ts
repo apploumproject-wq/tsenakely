@@ -710,7 +710,7 @@ class TsenakelyDatabase {
     await this.init(); const db = this.getDb();
     const active = queryOne<{id:number}>(db, `SELECT id FROM production_batches WHERE product_id=? AND status='ACTIVE'`, [productId]);
     if (active && productType === 'FINISHED') throw new Error('Clôturez la fabrication en cours avant de convertir ce produit.');
-    const snapshot=db.export(); db.run(`UPDATE products SET product_type=?, updated_at=? WHERE id=?`, [productType,new Date().toISOString(),productId]); await this.persistOrRestore(snapshot);
+    const snapshot=db.export(); db.run(`UPDATE products SET product_type=?, has_size_variants=CASE WHEN ?='HOMEMADE' THEN has_size_variants ELSE 0 END, updated_at=? WHERE id=?`, [productType,productType,new Date().toISOString(),productId]); await this.persistOrRestore(snapshot);
   }
   async getProductionBatches(): Promise<import('./types').ProductionBatch[]> {
     await this.init(); const db=this.getDb();

@@ -332,11 +332,11 @@ class TsenakelyDatabase {
       CREATE INDEX IF NOT EXISTS idx_stock_movements_created ON stock_movements(created_at);
     `);
 
-    const detailColumns = queryAll<{name: string}>(db, `PRAGMA table_info(sale_details)`).map((column) => column.name);
-    if (!detailColumns.includes('stock_units')) { db.run(`ALTER TABLE sale_details ADD COLUMN stock_units INTEGER NOT NULL DEFAULT 1`); schemaChanged = true; }
     const productColumns = queryAll<{name: string}>(db, `PRAGMA table_info(products)`).map((column) => column.name);
     const saleColumns = queryAll<{name: string}>(db, `PRAGMA table_info(sales)`).map((column) => column.name);
     let schemaChanged = false;
+    const detailColumns = queryAll<{name: string}>(db, `PRAGMA table_info(sale_details)`).map((column) => column.name);
+    if (!detailColumns.includes('stock_units')) { db.run(`ALTER TABLE sale_details ADD COLUMN stock_units INTEGER NOT NULL DEFAULT 1`); schemaChanged = true; }
     if (!productColumns.includes('product_type')) { db.run(`ALTER TABLE products ADD COLUMN product_type TEXT NOT NULL DEFAULT 'FINISHED'`); schemaChanged = true; }
     if (!productColumns.includes('image_data_url')) { db.run(`ALTER TABLE products ADD COLUMN image_data_url TEXT`); schemaChanged = true; }
     if (!productColumns.includes('category')) {
@@ -1060,7 +1060,7 @@ class TsenakelyDatabase {
         if (liveProduct.product_type === 'HOMEMADE' && !queryOne<{id:number}>(db, `SELECT id FROM production_batches WHERE product_id=? AND status='ACTIVE'`, [liveProduct.id])) {
           throw new Error(`Aucune fabrication en cours pour « ${liveProduct.name} ». Démarrez une fabrication avant d’enregistrer des ventes.`);
         }
-        if (liveProduct.product_type !== 'HOMEMADE' && liveProduct.stock_qty < item.quantity) {
+        if (liveProduct.product_type !== 'HOMEMADE' && liveProduct.stock_qty < item.quantity * (item.variant?.portions ?? 1)) {
           throw new Error(
             `Stock insuffisant pour « ${liveProduct.name} » (disponible : ${liveProduct.stock_qty}, demandé : ${item.quantity}).`
           );

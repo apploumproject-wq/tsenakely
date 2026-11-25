@@ -797,11 +797,11 @@ class TsenakelyDatabase {
     if (q) {
       return queryAll<Product>(
         db,
-        `SELECT * FROM products WHERE name LIKE ? ORDER BY name ASC`,
+        `SELECT p.*, EXISTS(SELECT 1 FROM production_batches b WHERE b.product_id=p.id AND b.status='ACTIVE') as has_active_production FROM products p WHERE p.name LIKE ? ORDER BY p.name ASC`,
         [`%${q}%`]
       );
     }
-    return queryAll<Product>(db, `SELECT * FROM products ORDER BY name ASC`);
+    return queryAll<Product>(db, `SELECT p.*, EXISTS(SELECT 1 FROM production_batches b WHERE b.product_id=p.id AND b.status='ACTIVE') as has_active_production FROM products p ORDER BY p.name ASC`);
   }
 
   async addProduct(
@@ -1050,6 +1050,9 @@ class TsenakelyDatabase {
         );
         if (!liveProduct) {
           throw new Error(`Produit introuvable : ${item.product.name}.`);
+        }
+        if (liveProduct.product_type === 'HOMEMADE' && !queryOne<{id:number}>(db, `SELECT id FROM production_batches WHERE product_id=? AND status='ACTIVE'`, [liveProduct.id])) {
+          throw new Error(`Aucune fabrication en cours pour « ${liveProduct.name} ». Démarrez une fabrication avant d’enregistrer des ventes.`);
         }
         if (liveProduct.product_type !== 'HOMEMADE' && liveProduct.stock_qty < item.quantity) {
           throw new Error(

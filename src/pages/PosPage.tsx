@@ -132,6 +132,10 @@ export const PosPage: React.FC<PosPageProps> = ({
 
   const addToCart = (product: Product) => {
     setError('');
+    if (product.product_type === 'HOMEMADE' && !product.has_active_production) {
+      setError(`Aucune fabrication en cours pour « ${product.name} ».`);
+      return;
+    }
     if (product.product_type !== 'HOMEMADE' && product.stock_qty <= 0) {
       setError(`« ${product.name} » est en rupture de stock.`);
       return;
@@ -525,7 +529,7 @@ export const PosPage: React.FC<PosPageProps> = ({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
               {visibleProducts.map((product) => {
                 const inCartQty = getCartQuantity(product.id);
-                const outOfStock = product.product_type !== 'HOMEMADE' && product.stock_qty === 0;
+                const outOfStock = product.product_type === 'HOMEMADE' ? !product.has_active_production : product.stock_qty === 0;
                 const lowStock =
                   product.product_type !== 'HOMEMADE' && !outOfStock && product.stock_qty <= product.min_stock;
 
@@ -574,7 +578,7 @@ export const PosPage: React.FC<PosPageProps> = ({
                         }`}
                       >
                         {outOfStock
-                          ? 'Rupture'
+                          ? (product.product_type === 'HOMEMADE' ? 'Aucune fabrication active' : 'Rupture')
                           : product.product_type === 'HOMEMADE' ? 'Fabrication maison' : `Stock : ${product.stock_qty}`}
                       </span>
                     </div>

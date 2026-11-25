@@ -108,6 +108,7 @@ export type ExportPeriod =
 export interface CartItem {
   product: Product;
   quantity: number;
+  variant?: { name: string; price: number; portions: number };
 }
 
 export interface DailySalesPoint {

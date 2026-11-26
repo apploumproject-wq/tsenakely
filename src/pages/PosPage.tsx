@@ -17,6 +17,7 @@ import type {
   AppSettings,
   CartItem,
   Product,
+  ProductVariant,
   SaleWithDetails,
   User,
 } from '../db/types';
@@ -37,6 +38,7 @@ export const PosPage: React.FC<PosPageProps> = ({
   onSaleCompleted,
 }) => {
   const [products, setProducts] = useState<Product[]>([]);
+  const [productVariants, setProductVariants] = useState<ProductVariant[]>([]);
   const [productCategories, setProductCategories] = useState<string[]>([]);
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('Toutes');
@@ -67,9 +69,11 @@ export const PosPage: React.FC<PosPageProps> = ({
     const [list, categories] = await Promise.all([
       tsenakelyDb.getProducts(),
       tsenakelyDb.getProductCategories(),
+      tsenakelyDb.getProductVariants(),
     ]);
     setProducts(list);
     setProductCategories(categories);
+    setProductVariants(variants);
     // Synchroniser les produits du panier avec les stocks/prix actuels
     setCart((prev) =>
       prev
@@ -133,7 +137,7 @@ export const PosPage: React.FC<PosPageProps> = ({
 
   const addToCart = (product: Product, variant?: {name:string;price:number;portions:number}) => {
     setError('');
-    if (product.product_type === 'HOMEMADE' && !variant) { setSelectedVariantProduct(product); return; }
+    if (product.product_type === 'HOMEMADE' && !variant && productVariants.some(v => v.product_id === product.id)) { setSelectedVariantProduct(product); return; }
     if (product.product_type === 'HOMEMADE' && !product.has_active_production) {
       setError(`Aucune fabrication en cours pour « ${product.name} ».`);
       return;
@@ -569,7 +573,7 @@ export const PosPage: React.FC<PosPageProps> = ({
 
                     <div className="mt-4 flex items-end justify-between gap-2">
                       <span className="text-base font-extrabold text-[#0F294A] font-mono-num">
-                        {formatAriary(product.price, currency)}{product.product_type === 'HOMEMADE' ? ' / Simple' : ''}
+                        {product.product_type === 'HOMEMADE' && productVariants.some(v => v.product_id === product.id) ? 'Variantes disponibles' : formatAriary(product.price, currency)}
                       </span>
                       <span
                         className={`text-xs font-medium font-mono-num ${
@@ -738,7 +742,7 @@ export const PosPage: React.FC<PosPageProps> = ({
         settings={settings}
         onClose={() => setThermalPreviewSale(null)}
       />
-      {selectedVariantProduct && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"><div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl"><h2 className="text-lg font-bold text-slate-900">Choisir le format</h2><p className="mt-1 text-sm text-slate-500">{selectedVariantProduct.name}</p><div className="mt-4 grid grid-cols-2 gap-3"><button type="button" onClick={()=>{addToCart(selectedVariantProduct,{name:'Simple',price:selectedVariantProduct.price,portions:1});setSelectedVariantProduct(null);}} className="rounded-xl border border-slate-300 p-4 text-left hover:border-blue-600"><strong className="block">Simple</strong><span className="mt-1 block text-sm">{formatAriary(selectedVariantProduct.price,currency)}</span><span className="text-xs text-slate-500">1 portion</span></button><button type="button" onClick={()=>{addToCart(selectedVariantProduct,{name:'Double',price:selectedVariantProduct.price*2,portions:2});setSelectedVariantProduct(null);}} className="rounded-xl border border-slate-300 p-4 text-left hover:border-blue-600"><strong className="block">Double</strong><span className="mt-1 block text-sm">{formatAriary(selectedVariantProduct.price*2,currency)}</span><span className="text-xs text-slate-500">2 portions</span></button></div><button type="button" onClick={()=>setSelectedVariantProduct(null)} className="mt-4 w-full rounded-xl border border-slate-300 p-2 text-sm">Annuler</button></div></div>}
+      {selectedVariantProduct && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"><div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl"><h2 className="text-lg font-bold text-slate-900">Choisir une variante</h2><p className="mt-1 text-sm text-slate-500">{selectedVariantProduct.name}</p><div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">{productVariants.filter(v=>v.product_id===selectedVariantProduct.id).map(variant=><button key={variant.id} type="button" onClick={()=>{addToCart(selectedVariantProduct,{name:variant.name,price:variant.price,portions:variant.portions});setSelectedVariantProduct(null);}} className="rounded-xl border border-slate-300 p-4 text-left hover:border-blue-600"><strong className="block">{variant.name}</strong><span className="mt-1 block text-sm">{formatAriary(variant.price,currency)}</span><span className="text-xs text-slate-500">Consomme {variant.portions} unité{variant.portions>1?'s':''}</span></button>)}</div><button type="button" onClick={()=>setSelectedVariantProduct(null)} className="mt-4 w-full rounded-xl border border-slate-300 p-2 text-sm">Annuler</button></div></div>}
     </div>
   );
 };

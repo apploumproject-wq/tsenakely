@@ -10,6 +10,8 @@ import type {
   PrinterConnectionMode,
   PrinterPaperWidth,
   Product,
+  ProductVariant,
+  ProductVariantInput,
   Sale,
   SaleDetail,
   SaleWithDetails,
@@ -270,6 +272,17 @@ class TsenakelyDatabase {
         updated_at TEXT NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS product_variants (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        product_id INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        price REAL NOT NULL CHECK(price >= 0),
+        portions INTEGER NOT NULL CHECK(portions > 0),
+        is_active INTEGER NOT NULL DEFAULT 1,
+        UNIQUE(product_id, name),
+        FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+      );
+
       CREATE TABLE IF NOT EXISTS production_batches (
         id INTEGER PRIMARY KEY AUTOINCREMENT, product_id INTEGER NOT NULL,
         product_name TEXT NOT NULL, produced_at TEXT NOT NULL, closed_at TEXT,
@@ -353,6 +366,19 @@ class TsenakelyDatabase {
       if (!saleColumns.includes(column)) { db.run(`ALTER TABLE sales ADD COLUMN ${column} TEXT`); schemaChanged = true; }
     }
     if (schemaChanged) await this.persist();
+
+    // Migration : conserver les anciens formats Simple/Double déjà utilisés.
+    const variantsSeeded = queryOne<{id: string}>(db, `SELECT id FROM schema_migrations WHERE id = ?`, ['homemade_variants_v1']);
+    if (!variantsSeeded) {
+      const now = new Date().toISOString();
+      const homemadeProducts = queryAll<{id:number;price:number}>(db, `SELECT id, price FROM products WHERE product_type='HOMEMADE'`);
+      for (const product of homemadeProducts) {
+        db.run(`INSERT OR IGNORE INTO product_variants(product_id,name,price,portions,is_active) VALUES(?,'Simple',?,1,1)`, [product.id, product.price]);
+        db.run(`INSERT OR IGNORE INTO product_variants(product_id,name,price,portions,is_active) VALUES(?,'Double',?,2,1)`, [product.id, product.price * 2]);
+      }
+      db.run(`INSERT INTO schema_migrations(id,applied_at) VALUES(?,?)`, ['homemade_variants_v1', now]);
+      await this.persist();
+    }
 
     const seeded = queryOne<{id: string}>(
       db,
@@ -738,12 +764,53 @@ class TsenakelyDatabase {
     const batch=queryOne<import('./types').ProductionBatch>(db,`SELECT * FROM production_batches WHERE id=? AND status='ACTIVE'`,[batchId]);
     if(!batch) throw new Error('Cette fabrication est introuvable ou déjà clôturée.');
     const now=new Date().toISOString();
-    const sales=queryOne<{quantity:number;revenue:number}>(db,`SELECT COALESCE(SUM(sd.quantity),0) as quantity,COALESCE(SUM(sd.subtotal),0) as revenue FROM sale_details sd INNER JOIN sales s ON s.id=sd.sale_id WHERE sd.product_id=? AND s.status='COMPLETED' AND s.sale_date>=? AND s.sale_date<=?`,[batch.product_id,batch.produced_at,now]);
+    const sales=queryOne<{quantity:number;revenue:number}>(db,`SELECT COALESCE(SUM(COALESCE(sd.stock_units,sd.quantity)),0) as quantity,COALESCE(SUM(sd.subtotal),0) as revenue FROM sale_details sd INNER JOIN sales s ON s.id=sd.sale_id WHERE sd.product_id=? AND s.status='COMPLETED' AND s.sale_date>=? AND s.sale_date<=?`,[batch.product_id,batch.produced_at,now]);
     const quantity=sales?.quantity??0, revenue=sales?.revenue??0, snapshot=db.export();
     db.run(`UPDATE production_batches SET closed_at=?,sold_quantity=?,revenue=?,profit=?,status='CLOSED' WHERE id=?`,[now,quantity,revenue,revenue-batch.total_cost,batchId]);
     await this.persistOrRestore(snapshot);
   }
   // ===================== PRODUITS & STOCKS =====================
+
+  async getProductVariants(productId?: number): Promise<ProductVariant[]> {
+    await this.init();
+    const db = this.getDb();
+    const rows = productId === undefined
+      ? queryAll<Omit<ProductVariant, 'is_active'> & {is_active:number}>(db, `SELECT * FROM product_variants WHERE is_active=1 ORDER BY product_id,id`)
+      : queryAll<Omit<ProductVariant, 'is_active'> & {is_active:number}>(db, `SELECT * FROM product_variants WHERE product_id=? AND is_active=1 ORDER BY id`, [productId]);
+    return rows.map(row => ({...row, is_active: row.is_active === 1}));
+  }
+
+  async saveProductVariants(productId: number, variants: ProductVariantInput[]): Promise<void> {
+    await this.init();
+    const db = this.getDb();
+    const product = queryOne<Product>(db, `SELECT * FROM products WHERE id=?`, [productId]);
+    if (!product || product.product_type !== 'HOMEMADE') throw new Error('Les variantes sont réservées aux produits faits maison.');
+    const normalized = variants.map(v => ({name:v.name.trim(), price:Number(v.price), portions:Number(v.portions)}));
+    const names = new Set<string>();
+    for (const variant of normalized) {
+      const key = variant.name.toLocaleLowerCase('fr');
+      if (!variant.name) throw new Error('Chaque variante doit avoir un nom.');
+      if (variant.name.length > 50) throw new Error('Le nom d’une variante ne doit pas dépasser 50 caractères.');
+      if (names.has(key)) throw new Error(`La variante « ${variant.name} » est présente plusieurs fois.`);
+      names.add(key);
+      if (!Number.isFinite(variant.price) || variant.price < 0) throw new Error(`Prix invalide pour « ${variant.name} ».`);
+      if (!Number.isInteger(variant.portions) || variant.portions < 1) throw new Error(`La quantité consommée pour « ${variant.name} » doit être un entier positif.`);
+    }
+    const snapshot = db.export();
+    let transactionActive = false;
+    db.run('BEGIN TRANSACTION;'); transactionActive = true;
+    try {
+      db.run(`DELETE FROM product_variants WHERE product_id=?`, [productId]);
+      for (const variant of normalized) {
+        db.run(`INSERT INTO product_variants(product_id,name,price,portions,is_active) VALUES(?,?,?,?,1)`, [productId,variant.name,Math.round(variant.price),variant.portions]);
+      }
+      db.run('COMMIT;'); transactionActive = false;
+      await this.persistOrRestore(snapshot);
+    } catch (error) {
+      if (transactionActive) db.run('ROLLBACK;');
+      throw error;
+    }
+  }
 
   async getProductCategories(): Promise<string[]> {
     await this.init();
@@ -1065,9 +1132,17 @@ class TsenakelyDatabase {
             `Stock insuffisant pour « ${liveProduct.name} » (disponible : ${liveProduct.stock_qty}, demandé : ${item.quantity}).`
           );
         }
-        const unitPrice = item.variant?.price ?? liveProduct.price;
-        const portions = item.variant?.portions ?? 1;
-        if (!Number.isFinite(unitPrice) || unitPrice < 0 || !Number.isInteger(portions) || portions < 1) throw new Error('Format de vente invalide.');
+        let unitPrice = liveProduct.price;
+        let portions = 1;
+        let variantName: string | null = null;
+        if (item.variant) {
+          const liveVariant = queryOne<{name:string;price:number;portions:number}>(db, `SELECT name,price,portions FROM product_variants WHERE product_id=? AND name=? AND is_active=1`, [liveProduct.id,item.variant.name]);
+          if (!liveVariant) throw new Error(`La variante « ${item.variant.name} » n’est plus disponible pour « ${liveProduct.name} ».`);
+          unitPrice = liveVariant.price; portions = liveVariant.portions; variantName = liveVariant.name;
+        } else if (liveProduct.product_type === 'HOMEMADE' && queryOne<{id:number}>(db, `SELECT id FROM product_variants WHERE product_id=? AND is_active=1 LIMIT 1`, [liveProduct.id])) {
+          throw new Error(`Choisissez une variante pour « ${liveProduct.name} ».`);
+        }
+        if (!Number.isFinite(unitPrice) || unitPrice < 0 || !Number.isInteger(portions) || portions < 1) throw new Error('Variante de vente invalide.');
         const subtotal = Math.round(unitPrice * item.quantity);
         totalAmount += subtotal;
         verifiedItems.push({
@@ -1076,7 +1151,7 @@ class TsenakelyDatabase {
           subtotal,
           unitPrice,
           stockUnits: item.quantity * portions,
-          productName: item.variant ? `${liveProduct.name} (${item.variant.name})` : liveProduct.name,
+          productName: variantName ? `${liveProduct.name} (${variantName})` : liveProduct.name,
         });
       }
 
@@ -1818,11 +1893,12 @@ class TsenakelyDatabase {
     const db = this.getDb();
     const payload = {
       app: 'TSENAKELY',
-      version: 1,
+      version: 2,
       exported_at: new Date().toISOString(),
       app_settings: queryAll(db, `SELECT * FROM app_settings`),
       users: queryAll(db, `SELECT * FROM users`),
       products: queryAll(db, `SELECT * FROM products`),
+      product_variants: queryAll(db, `SELECT * FROM product_variants`),
       sales: queryAll(db, `SELECT * FROM sales`),
       sale_details: queryAll(db, `SELECT * FROM sale_details`),
       stock_movements: queryAll(db, `SELECT * FROM stock_movements`),
@@ -1866,6 +1942,7 @@ class TsenakelyDatabase {
       db.run(`DELETE FROM production_ingredients`);
       db.run(`DELETE FROM production_batches`);
       db.run(`DELETE FROM stock_movements`);
+      db.run(`DELETE FROM product_variants`);
       db.run(`DELETE FROM products`);
       db.run(`DELETE FROM users`);
       db.run(`DELETE FROM app_settings`);
@@ -2002,6 +2079,19 @@ class TsenakelyDatabase {
             d.stock_units ?? d.quantity,
           ]
         );
+      }
+
+      if (Array.isArray(parsed.product_variants)) {
+        for (const v of parsed.product_variants as Array<{id:number;product_id:number;name:string;price:number;portions:number;is_active?:number}>) {
+          db.run(`INSERT INTO product_variants(id,product_id,name,price,portions,is_active) VALUES(?,?,?,?,?,?)`, [v.id,v.product_id,v.name,v.price,v.portions,v.is_active ?? 1]);
+        }
+      } else {
+        // Compatibilité avec les anciennes sauvegardes JSON sans variantes.
+        const legacyHomemade = queryAll<{id:number;price:number}>(db, `SELECT id,price FROM products WHERE product_type='HOMEMADE'`);
+        for (const p of legacyHomemade) {
+          db.run(`INSERT INTO product_variants(product_id,name,price,portions,is_active) VALUES(?, 'Simple', ?, 1, 1)`, [p.id,p.price]);
+          db.run(`INSERT INTO product_variants(product_id,name,price,portions,is_active) VALUES(?, 'Double', ?, 2, 1)`, [p.id,p.price*2]);
+        }
       }
 
       for (const m of parsed.stock_movements as Array<{

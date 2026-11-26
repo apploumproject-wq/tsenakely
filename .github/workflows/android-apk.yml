@@ -58,7 +58,7 @@ jobs:
               config["appName"] = "TSENAKELY PRO"
           with open(path, "w", encoding="utf-8") as f:
               json.dump(config, f, ensure_ascii=False, indent=2)
-              f.write("\\n")
+              f.write("\n")
           PY
 
       - name: Construire les fichiers Android

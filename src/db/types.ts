@@ -106,6 +106,21 @@ export type ExportPeriod =
   | 'year'
   | 'custom';
 
+export interface ProductVariant {
+  id: number;
+  product_id: number;
+  name: string;
+  price: number;
+  portions: number;
+  is_active: boolean;
+}
+
+export interface ProductVariantInput {
+  name: string;
+  price: number;
+  portions: number;
+}
+
 export interface CartItem {
   product: Product;
   quantity: number;

@@ -367,11 +367,11 @@ class TsenakelyDatabase {
     }
     if (schemaChanged) await this.persist();
 
-    // Migration : conserver les anciens formats Simple/Double déjà utilisés.
+    // Migration : conserver Simple/Double pour les anciennes glaces ; les autres produits démarrent sans variante.
     const variantsSeeded = queryOne<{id: string}>(db, `SELECT id FROM schema_migrations WHERE id = ?`, ['homemade_variants_v1']);
     if (!variantsSeeded) {
       const now = new Date().toISOString();
-      const homemadeProducts = queryAll<{id:number;price:number}>(db, `SELECT id, price FROM products WHERE product_type='HOMEMADE'`);
+      const homemadeProducts = queryAll<{id:number;price:number}>(db, `SELECT id, price FROM products WHERE product_type='HOMEMADE' AND lower(name) LIKE '%glace%'`);
       for (const product of homemadeProducts) {
         db.run(`INSERT OR IGNORE INTO product_variants(product_id,name,price,portions,is_active) VALUES(?,'Simple',?,1,1)`, [product.id, product.price]);
         db.run(`INSERT OR IGNORE INTO product_variants(product_id,name,price,portions,is_active) VALUES(?,'Double',?,2,1)`, [product.id, product.price * 2]);
@@ -2086,8 +2086,8 @@ class TsenakelyDatabase {
           db.run(`INSERT INTO product_variants(id,product_id,name,price,portions,is_active) VALUES(?,?,?,?,?,?)`, [v.id,v.product_id,v.name,v.price,v.portions,v.is_active ?? 1]);
         }
       } else {
-        // Compatibilité avec les anciennes sauvegardes JSON sans variantes.
-        const legacyHomemade = queryAll<{id:number;price:number}>(db, `SELECT id,price FROM products WHERE product_type='HOMEMADE'`);
+        // Compatibilité avec les anciennes sauvegardes JSON : seules les glaces reprennent Simple/Double.
+        const legacyHomemade = queryAll<{id:number;price:number}>(db, `SELECT id,price FROM products WHERE product_type='HOMEMADE' AND lower(name) LIKE '%glace%'`);
         for (const p of legacyHomemade) {
           db.run(`INSERT INTO product_variants(product_id,name,price,portions,is_active) VALUES(?, 'Simple', ?, 1, 1)`, [p.id,p.price]);
           db.run(`INSERT INTO product_variants(product_id,name,price,portions,is_active) VALUES(?, 'Double', ?, 2, 1)`, [p.id,p.price*2]);

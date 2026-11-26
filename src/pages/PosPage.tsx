@@ -66,7 +66,7 @@ export const PosPage: React.FC<PosPageProps> = ({
   const currency = settings.currency || 'Ar';
 
   const loadProducts = useCallback(async () => {
-    const [list, categories] = await Promise.all([
+    const [list, categories, variants] = await Promise.all([
       tsenakelyDb.getProducts(),
       tsenakelyDb.getProductCategories(),
       tsenakelyDb.getProductVariants(),
